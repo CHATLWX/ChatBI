@@ -1,0 +1,67 @@
+app:
+  name: Enterprise ChatBI
+  version: 1.0.0
+
+data:
+  default_source: mysql_main
+  sources:
+    mysql_main:
+      driver: mysql
+      host: 127.0.0.1
+      port: 3306
+      database: chatbi
+      user: root
+
+llm:
+  model: qwen-plus
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  temperature: 0.0
+  timeout: 90
+  max_tokens: 4000
+  embedding_model: text-embedding-v3
+  embedding_dimension: 1024
+  chunk_size: 800
+  chunk_overlap: 120
+
+milvus:
+  uri: http://localhost:19530
+  token: ""
+  db_name: default
+  collections:
+    tables: table_descriptions
+    fields: field_descriptions
+    indicators: indicator_definitions
+
+retrieval:
+  table_top_k: 5
+  field_top_k: 12
+  indicator_top_k: 3
+  table_score_threshold: 0.20
+  field_score_threshold: 0.25
+  indicator_score_threshold: 0.30
+  field_rule_weight: 0.30
+
+runtime:
+  pool_size: 5
+  pool_max_overflow: 5
+  pool_timeout: 3
+  connect_timeout: 5
+  read_timeout: 30
+  write_timeout: 30
+  slow_query_threshold_ms: 200
+  query_timeout_ms: 15000
+  query_max_rows: 500
+  sql_retry_count: 2
+  agent_max_retries: 2
+  agent_failure_policy: skip
+  agent_storage_backend: memory
+
+features:
+  few_shot: true
+  rules: true
+  guards: true
+  indicator_knowledge: true
+  schema_linking: true
+  indicator_rag: true
+  agent_planning: true
+  report: true

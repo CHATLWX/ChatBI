@@ -1,0 +1,194 @@
+from types import SimpleNamespace
+
+from query_decomposer import MAX_TASKS, QueryDecomposer
+
+
+class FakeLLM:
+    def __init__(self, responses):
+        self.responses = iter(responses)
+        self.calls = 0
+        self.config = SimpleNamespace(llm=SimpleNamespace(max_tokens=4000))
+
+    def generate_json(self, *_args):
+        self.calls += 1
+        return next(self.responses)
+
+
+def task(task_id, depends_on=None, dimensions=None):
+    return {
+        "task_id": task_id,
+        "task_name": task_id,
+        "task_type": "analysis",
+        "description": "执行一个明确查询",
+        "depends_on": depends_on or [],
+        "dimensions": dimensions or [],
+        "metrics": ["毛利"],
+    }
+
+
+def test_normalizes_modeled_dimension_alias():
+    llm = FakeLLM([
+        {
+            "question_type": "trend",
+            "analysis_goal": "查看趋势",
+            "subtasks": [task("task_1", dimensions=["region", "product_line"])],
+        }
+    ])
+    plan = QueryDecomposer(llm).decompose("查看利润趋势")
+    assert plan.subtasks[0].dimensions == ["大区", "产品线"]
+
+
+def test_retries_once_when_task_count_exceeds_lesson_limit():
+    too_many = {
+        "question_type": "trend",
+        "analysis_goal": "查看趋势",
+        "subtasks": [task(f"task_{index}") for index in range(1, MAX_TASKS + 2)],
+    }
+    valid = {
+        "question_type": "trend",
+        "analysis_goal": "查看趋势",
+        "subtasks": [task("task_1")],
+    }
+    llm = FakeLLM([too_many, valid])
+    plan = QueryDecomposer(llm).decompose("分析近半年利润")
+    assert len(plan.subtasks) == 1
+    assert llm.calls == 2
+
+
+def test_rejects_forward_dependency_then_retries():
+    invalid = {
+        "question_type": "trend",
+        "analysis_goal": "查看趋势",
+        "subtasks": [task("task_1", ["task_2"]), task("task_2")],
+    }
+    valid = {
+        "question_type": "trend",
+        "analysis_goal": "查看趋势",
+        "subtasks": [task("task_1"), task("task_2", ["task_1"])],
+    }
+    llm = FakeLLM([invalid, valid])
+    plan = QueryDecomposer(llm).decompose("分析利润")
+    assert plan.subtasks[1].depends_on == ["task_1"]
+
+
+def test_retries_when_one_step_contains_too_many_dimensions():
+    invalid = {
+        "question_type": "attribution",
+        "analysis_goal": "归因",
+        "subtasks": [task("task_1", dimensions=["月份", "大区", "产品线"])],
+    }
+    valid = {
+        "question_type": "attribution",
+        "analysis_goal": "归因",
+        "subtasks": [task("task_1", dimensions=["月份", "大区"])],
+    }
+    llm = FakeLLM([invalid, valid])
+    plan = QueryDecomposer(llm).decompose("利润归因")
+    assert plan.subtasks[0].dimensions == ["月份", "大区"]
+    assert llm.calls == 2
+
+
+def test_retries_when_model_invents_absolute_dates_for_relative_period():
+    invalid_task = task("task_1", dimensions=["月份"])
+    invalid_task["description"] = "分析 2024-07、2024-08、2024-09 的利润"
+    valid_task = task("task_1", dimensions=["月份"])
+    valid_task["description"] = "分析最近三个月的利润"
+    llm = FakeLLM(
+        [
+            {
+                "question_type": "trend",
+                "analysis_goal": "分析最近三个月的利润",
+                "subtasks": [invalid_task],
+            },
+            {
+                "question_type": "trend",
+                "analysis_goal": "分析最近三个月的利润",
+                "subtasks": [valid_task],
+            },
+        ]
+    )
+
+    plan = QueryDecomposer(llm).decompose("最近三个月利润为什么下降？")
+
+    assert plan.subtasks[0].description == "分析最近三个月的利润"
+    assert llm.calls == 2
+
+
+def test_retries_when_description_mentions_unselected_dimension():
+    invalid_task = task("task_1", dimensions=["月份", "客户类型"])
+    invalid_task["description"] = "按月份、客户类型和大区分析收入"
+    valid_task = task("task_1", dimensions=["月份", "客户类型"])
+    valid_task["description"] = "按月份和客户类型分析收入"
+    llm = FakeLLM(
+        [
+            {
+                "question_type": "attribution",
+                "analysis_goal": "分析收入变化",
+                "subtasks": [invalid_task],
+            },
+            {
+                "question_type": "attribution",
+                "analysis_goal": "分析收入变化",
+                "subtasks": [valid_task],
+            },
+        ]
+    )
+
+    plan = QueryDecomposer(llm).decompose("分析收入变化")
+
+    assert plan.subtasks[0].dimensions == ["月份", "客户类型"]
+    assert llm.calls == 2
+
+
+def test_retries_when_profit_uses_dimension_without_expense_allocation():
+    invalid_task = task("task_1", dimensions=["月份", "大区"])
+    invalid_task["description"] = "按月份和大区分析利润"
+    invalid_task["metrics"] = ["利润"]
+    valid_task = task("task_1", dimensions=["月份", "大区"])
+    valid_task["description"] = "按月份和大区分析毛利"
+    valid_task["metrics"] = ["毛利"]
+    llm = FakeLLM(
+        [
+            {
+                "question_type": "attribution",
+                "analysis_goal": "分析利润变化",
+                "subtasks": [invalid_task],
+            },
+            {
+                "question_type": "attribution",
+                "analysis_goal": "分析利润变化",
+                "subtasks": [valid_task],
+            },
+        ]
+    )
+
+    plan = QueryDecomposer(llm).decompose("分析利润变化")
+
+    assert plan.subtasks[0].metrics == ["毛利"]
+    assert llm.calls == 2
+
+
+def test_retries_when_model_invents_undefined_metric():
+    invalid_task = task("task_1", dimensions=["月份"])
+    invalid_task["metrics"] = ["销售成本率"]
+    valid_task = task("task_1", dimensions=["月份"])
+    valid_task["metrics"] = ["销售成本", "毛利率"]
+    llm = FakeLLM(
+        [
+            {
+                "question_type": "trend",
+                "analysis_goal": "分析成本变化",
+                "subtasks": [invalid_task],
+            },
+            {
+                "question_type": "trend",
+                "analysis_goal": "分析成本变化",
+                "subtasks": [valid_task],
+            },
+        ]
+    )
+
+    plan = QueryDecomposer(llm).decompose("分析成本变化")
+
+    assert plan.subtasks[0].metrics == ["销售成本", "毛利率"]
+    assert llm.calls == 2
