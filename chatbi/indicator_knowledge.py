@@ -1,59 +1,90 @@
 from __future__ import annotations
 
-from indicator_metadata import INDICATOR_BY_NAME, INDICATOR_DEFINITIONS
+from config import AppConfig, settings
+from indicator_metadata import INDICATOR_CATALOG, IndicatorCatalog
+from obsidian_indicator_store import ObsidianIndicatorStore
 
 
 class IndicatorKnowledge:
-    """第 9 课的关键词指标知识；第 20 课作为指标 RAG 的降级路径。"""
+    """Local fallback plus Obsidian-backed metric detection and dependency resolution."""
 
-    def __init__(self):
-        self.indicators = INDICATOR_BY_NAME
-        self.alias_map: dict[str, str] = {}
-        for indicator in INDICATOR_DEFINITIONS:
-            self.alias_map[indicator["name"].lower()] = indicator["name"]
-            for alias in indicator.get("aliases", []):
-                self.alias_map[alias.lower()] = indicator["name"]
+    def __init__(
+        self,
+        config: AppConfig = settings,
+        store: ObsidianIndicatorStore | None = None,
+    ):
+        self.config = config
+        self.store = store or ObsidianIndicatorStore(config)
+
+    def _runtime_catalog(self) -> tuple[IndicatorCatalog, str]:
+        return self.store.runtime_catalog(INDICATOR_CATALOG)
 
     def detect_indicators(self, question: str) -> list[str]:
-        detected = []
-        question_lower = question.lower()
-        for alias, standard_name in self.alias_map.items():
-            if alias in question_lower and standard_name not in detected:
-                detected.append(standard_name)
-        return detected
+        catalog, _ = self._runtime_catalog()
+        return catalog.detect(question)
 
-    def get_indicator_text(self, indicator_name: str) -> str:
-        indicator = self.indicators.get(indicator_name)
+    @staticmethod
+    def get_indicator_text(indicator_name: str, catalog: IndicatorCatalog) -> str:
+        indicator = catalog.by_name.get(indicator_name)
         if not indicator:
             return ""
         lines = [
-            f"指标：{indicator['name']}",
-            f"  定义：{indicator['definition']}",
-            f"  计算公式：{indicator['formula']}",
-            f"  数据来源：{', '.join(indicator['data_source'])}",
+            f"指标：{indicator.name}",
+            f"  层级：{indicator.level}",
+            f"  定义：{indicator.definition}",
+            f"  计算公式：{indicator.formula}",
+            f"  数据来源：{', '.join(indicator.data_source)}",
+            f"  时间字段：{indicator.time_field}",
         ]
-        if indicator.get("depends_on"):
-            lines.append(f"  依赖指标：{', '.join(indicator['depends_on'])}")
-        if indicator.get("filters"):
-            lines.append(f"  强制过滤：{' AND '.join(indicator['filters'])}")
+        if indicator.depends_on:
+            lines.append(f"  依赖指标：{', '.join(indicator.depends_on)}")
+        if indicator.filters:
+            lines.append(f"  强制过滤：{' AND '.join(indicator.filters)}")
+        if indicator.notes:
+            lines.append(f"  注意：{indicator.notes}")
         return "\n".join(lines)
 
+    @staticmethod
+    def get_dependency_text(indicator_name: str, catalog: IndicatorCatalog) -> str:
+        """Compact dependency context; full lineage stays in response metadata."""
+        indicator = catalog.by_name.get(indicator_name)
+        if not indicator:
+            return ""
+        return "\n".join(
+            [
+                f"依赖指标：{indicator.name}",
+                f"  计算公式：{indicator.formula}",
+                f"  强制过滤：{' AND '.join(indicator.filters) or '无'}",
+            ]
+        )
+
     def get_indicator_context(self, question: str) -> dict:
-        detected = self.detect_indicators(question)
+        catalog, source = self._runtime_catalog()
+        detected = catalog.detect(question)
         if not detected:
-            return {"detected_indicators": [], "indicator_block": ""}
-        blocks = ["【指标知识】"]
-        injected: set[str] = set()
-        for name in detected:
-            if name not in injected:
-                blocks.append(self.get_indicator_text(name))
-                injected.add(name)
-            indicator = self.indicators.get(name)
-            for dependency in indicator.get("depends_on", []) if indicator else []:
-                if dependency not in injected:
-                    blocks.append(self.get_indicator_text(dependency))
-                    injected.add(dependency)
+            return {
+                "detected_indicators": [],
+                "indicator_block": "",
+                "indicator_source": source,
+                "dependency_graph": {},
+            }
+
+        resolved = catalog.resolve_dependencies(detected, recursive=True)
+        root_names = set(detected)
+        blocks = [f"【指标知识｜来源：{source}】"]
+        for item in resolved:
+            if item.indicator.name in root_names:
+                blocks.append(self.get_indicator_text(item.indicator.name, catalog))
+            else:
+                blocks.append(self.get_dependency_text(item.indicator.name, catalog))
+        names = [item.indicator.name for item in resolved]
         return {
-            "detected_indicators": list(injected),
+            "detected_indicators": names,
             "indicator_block": "\n\n".join(blocks),
+            "indicator_source": source,
+            "dependency_graph": catalog.dependency_graph(names),
+            "dependency_paths": {
+                item.indicator.name: list(item.dependency_path)
+                for item in resolved
+            },
         }

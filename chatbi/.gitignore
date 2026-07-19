@@ -1,0 +1,26 @@
+# Local secrets and overrides
+.env
+.env.*
+!.env.example
+
+# README is intentionally local-only for this repository.
+README.md
+
+# Runtime state and generated data
+logs/
+obsidian_vault/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pid
+
+# Python and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local IDE settings
+.idea/
+.vscode/

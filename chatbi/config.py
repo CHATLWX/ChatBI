@@ -60,6 +60,13 @@ class RetrievalConfig(BaseModel):
     field_rule_weight: float = 0.30
 
 
+class ObsidianConfig(BaseModel):
+    vault_path: str = ""
+    indicator_folder: str = "ChatBI指标知识库"
+    auto_discover: bool = True
+    runtime_preferred: bool = True
+
+
 class RuntimeConfig(BaseModel):
     pool_size: int = 5
     pool_max_overflow: int = 5
@@ -94,6 +101,7 @@ class AppConfig(BaseModel):
     data_sources: dict[str, DataSourceConfig] = Field(default_factory=dict)
     llm: LLMConfig
     milvus: MilvusConfig
+    obsidian: ObsidianConfig = Field(default_factory=ObsidianConfig)
     retrieval: RetrievalConfig
     runtime: RuntimeConfig
     features: FeatureConfig
@@ -150,6 +158,24 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             "db_name": os.getenv("MILVUS_DB_NAME", milvus.get("db_name", "default")),
         }
     )
+    obsidian = dict(raw.get("obsidian", {}))
+    obsidian.update(
+        {
+            "vault_path": os.getenv("OBSIDIAN_VAULT_PATH", obsidian.get("vault_path", "")),
+            "indicator_folder": os.getenv(
+                "OBSIDIAN_INDICATOR_FOLDER",
+                obsidian.get("indicator_folder", "ChatBI指标知识库"),
+            ),
+            "auto_discover": _env_bool(
+                "OBSIDIAN_AUTO_DISCOVER",
+                bool(obsidian.get("auto_discover", True)),
+            ),
+            "runtime_preferred": _env_bool(
+                "OBSIDIAN_RUNTIME_PREFERRED",
+                bool(obsidian.get("runtime_preferred", True)),
+            ),
+        }
+    )
     features = dict(raw.get("features", {}))
     for key in list(features):
         features[key] = _env_bool(f"FEATURE_{key.upper()}", bool(features[key]))
@@ -166,6 +192,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         data_sources=data_sources,
         llm=LLMConfig(**llm),
         milvus=MilvusConfig(**milvus),
+        obsidian=ObsidianConfig(**obsidian),
         retrieval=RetrievalConfig(**raw.get("retrieval", {})),
         runtime=RuntimeConfig(**raw.get("runtime", {})),
         features=FeatureConfig(**features),

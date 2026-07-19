@@ -80,6 +80,9 @@ class LLMClient:
     @staticmethod
     def extract_sql(raw: str) -> str:
         cleaned = re.sub(r"```(?:sql)?|```", "", raw, flags=re.I).strip()
+        # Models sometimes Markdown-escape identifiers even when no code fence
+        # is emitted. Backslash-underscore is not a valid MySQL identifier.
+        cleaned = cleaned.replace("\\_", "_")
         match = re.search(r"\b(select|with)\b", cleaned, re.I)
         if not match:
             raise LLMError("模型未生成 SELECT/CTE SQL")

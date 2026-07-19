@@ -1,43 +1,728 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Enterprise ChatBI</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ChatBI · 企业数据智能</title>
   <style>
-    :root{color-scheme:light;--ink:#172033;--muted:#657086;--line:#dfe4ec;--brand:#3558d4;--panel:#fff;--bg:#f4f6fa}
-    *{box-sizing:border-box}body{margin:0;font:15px/1.6 system-ui,"Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink)}
-    header{background:#18223b;color:#fff;padding:18px 28px}header h1{margin:0;font-size:21px}header small{opacity:.7}
-    main{max-width:1180px;margin:24px auto;padding:0 20px}.grid{display:grid;grid-template-columns:1fr 340px;gap:18px}
-    .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 3px 12px #1720330a}
-    textarea{width:100%;min-height:96px;padding:12px;border:1px solid var(--line);border-radius:8px;resize:vertical;font:inherit}
-    button{border:0;border-radius:8px;background:var(--brand);color:#fff;padding:10px 18px;font-weight:600;cursor:pointer}button:disabled{opacity:.5}
-    .examples button{display:block;width:100%;margin:8px 0;text-align:left;background:#eef1fb;color:#293d8f;font-weight:400}
-    #status{color:var(--muted);margin:12px 0}.event{border-left:3px solid #91a2e8;padding:7px 10px;margin:7px 0;background:#f8f9fd}
-    pre{white-space:pre-wrap;overflow:auto;background:#101728;color:#dce4ff;padding:14px;border-radius:8px}table{border-collapse:collapse;width:100%}th,td{border:1px solid var(--line);padding:7px;text-align:left}th{background:#f3f5f9}
-    .report{white-space:pre-wrap}.error{color:#a32121;background:#fff1f1;padding:10px;border-radius:8px}@media(max-width:850px){.grid{grid-template-columns:1fr}}
+    :root {
+      color-scheme: dark;
+      --bg: #020617;
+      --sidebar: #07101f;
+      --panel: #0b1424;
+      --panel-strong: #101b2d;
+      --panel-soft: #0e192a;
+      --line: #1e2b3f;
+      --line-strong: #2b3b53;
+      --text: #f8fafc;
+      --text-soft: #d5deea;
+      --muted: #8391a7;
+      --primary: #6d7cff;
+      --primary-hover: #8290ff;
+      --primary-soft: rgba(109, 124, 255, .13);
+      --success: #22c55e;
+      --success-soft: rgba(34, 197, 94, .11);
+      --danger: #fb7185;
+      --danger-soft: rgba(251, 113, 133, .1);
+      --warning: #fbbf24;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --shadow: 0 18px 55px rgba(0, 0, 0, .28);
+      --sidebar-width: 252px;
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 320px; background: var(--bg); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 78% -10%, rgba(78, 94, 210, .15), transparent 28rem),
+        var(--bg);
+      font: 14px/1.6 Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, textarea:focus-visible, summary:focus-visible {
+      outline: 3px solid rgba(129, 140, 248, .42);
+      outline-offset: 2px;
+    }
+
+    .app { min-height: 100vh; }
+    .sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 10;
+      display: flex;
+      width: var(--sidebar-width);
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background: rgba(7, 16, 31, .94);
+      backdrop-filter: blur(18px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: 78px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand-mark {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      border: 1px solid rgba(129, 140, 248, .34);
+      border-radius: 11px;
+      color: #a5b4fc;
+      background: linear-gradient(145deg, rgba(109, 124, 255, .25), rgba(109, 124, 255, .04));
+      box-shadow: inset 0 1px rgba(255,255,255,.06), 0 8px 24px rgba(79, 70, 229, .16);
+    }
+    .brand-mark svg { width: 21px; height: 21px; }
+    .brand-name { font-size: 17px; font-weight: 720; letter-spacing: -.02em; }
+    .brand-tag { margin-top: -2px; color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+
+    .nav { padding: 22px 14px; }
+    .nav-label { padding: 0 10px 8px; color: #64748b; font-size: 10px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+    .nav-item {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: 11px;
+      margin: 3px 0;
+      padding: 10px 11px;
+      border: 0;
+      border-radius: 10px;
+      color: #8796ab;
+      background: transparent;
+      text-align: left;
+      transition: color .18s ease, background .18s ease, transform .18s ease;
+    }
+    .nav-item svg { width: 18px; height: 18px; flex: 0 0 auto; }
+    .nav-item:hover { color: var(--text-soft); background: rgba(255,255,255,.035); }
+    .nav-item.active { color: #e8ebff; background: var(--primary-soft); box-shadow: inset 2px 0 var(--primary); }
+    .nav-item.disabled { cursor: default; opacity: .56; }
+    .nav-item.disabled:hover { color: #8796ab; background: transparent; }
+
+    .sidebar-footer { margin-top: auto; padding: 16px; }
+    .service-card {
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      background: rgba(255,255,255,.022);
+    }
+    .service-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .service-title { color: var(--text-soft); font-size: 12px; font-weight: 650; }
+    .online-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 0 4px rgba(34,197,94,.1), 0 0 12px rgba(34,197,94,.45); }
+    .service-meta { margin-top: 7px; color: var(--muted); font-size: 11px; }
+
+    .main { min-height: 100vh; margin-left: var(--sidebar-width); }
+    .topbar {
+      display: flex;
+      min-height: 78px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px clamp(22px, 4vw, 52px);
+      border-bottom: 1px solid rgba(30, 43, 63, .75);
+      background: rgba(2, 6, 23, .52);
+      backdrop-filter: blur(12px);
+    }
+    .topbar-title { margin: 0; font-size: 15px; font-weight: 650; }
+    .breadcrumb { color: var(--muted); font-size: 12px; }
+    .user-chip { display: flex; align-items: center; gap: 9px; color: var(--text-soft); font-size: 12px; }
+    .avatar { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid #34445e; border-radius: 50%; color: #c7d2fe; background: #142039; font-weight: 700; }
+
+    .workspace { width: min(1180px, calc(100% - 44px)); margin: 0 auto; padding: 44px 0 70px; }
+    .hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; margin-bottom: 24px; }
+    .eyebrow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: #94a3b8; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .eyebrow::before { content: ""; width: 19px; height: 1px; background: #64748b; }
+    h1 { margin: 0; font-size: clamp(28px, 4vw, 42px); line-height: 1.14; letter-spacing: -.04em; }
+    .hero p { max-width: 610px; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+    .model-pill { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 999px; color: #a7b3c5; background: rgba(11, 20, 36, .74); font: 11px/1.2 "Cascadia Code", Consolas, monospace; }
+    .model-pill svg { width: 15px; height: 15px; color: #818cf8; }
+
+    .composer {
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      background: linear-gradient(145deg, rgba(16, 27, 45, .97), rgba(9, 17, 31, .97));
+      box-shadow: var(--shadow), inset 0 1px rgba(255,255,255,.035);
+      transition: border-color .2s ease, box-shadow .2s ease;
+    }
+    .composer:focus-within { border-color: rgba(109,124,255,.72); box-shadow: 0 22px 70px rgba(0,0,0,.3), 0 0 0 4px rgba(109,124,255,.07); }
+    #question {
+      display: block;
+      width: 100%;
+      min-height: 128px;
+      padding: 22px 24px 12px;
+      resize: vertical;
+      border: 0;
+      outline: 0;
+      color: var(--text);
+      background: transparent;
+      font-size: 16px;
+      line-height: 1.65;
+    }
+    #question::placeholder { color: #56657a; }
+    .context-strip { display: none; align-items: center; justify-content: space-between; gap: 12px; margin: 0 14px 10px; padding: 9px 11px; border: 1px solid rgba(109,124,255,.24); border-radius: 9px; color: #aeb9d8; background: rgba(109,124,255,.08); font-size: 11px; }
+    .context-strip.visible { display: flex; }
+    .context-copy { display: flex; align-items: center; gap: 7px; }
+    .context-copy svg { width: 14px; height: 14px; color: #a5b4fc; }
+    .context-clear { padding: 2px 7px; border: 0; border-radius: 6px; color: #94a3b8; background: rgba(255,255,255,.05); font-size: 10px; }
+    .context-clear:hover { color: #fff; background: rgba(255,255,255,.1); }
+    .composer-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 14px 14px 20px; border-top: 1px solid rgba(43, 59, 83, .6); }
+    .composer-hint { display: flex; align-items: center; gap: 7px; color: #68778c; font-size: 11px; }
+    .composer-hint svg { width: 14px; height: 14px; }
+    .actions { display: flex; gap: 9px; }
+    .btn { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 8px; padding: 0 15px; border: 1px solid transparent; border-radius: 10px; font-weight: 650; transition: transform .16s ease, background .16s ease, border-color .16s ease, opacity .16s ease; }
+    .btn svg { width: 16px; height: 16px; }
+    .btn:hover:not(:disabled) { transform: translateY(-1px); }
+    .btn:active:not(:disabled) { transform: translateY(0); }
+    .btn:disabled { cursor: wait; opacity: .52; }
+    .btn-primary { color: white; background: var(--primary); box-shadow: 0 8px 25px rgba(79,70,229,.2); }
+    .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+    .btn-secondary { border-color: var(--line-strong); color: #dbe3ee; background: rgba(255,255,255,.035); }
+    .btn-secondary:hover:not(:disabled) { border-color: #40516d; background: rgba(255,255,255,.06); }
+
+    .quick-section { margin-top: 22px; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .section-title { margin: 0; color: #aab5c5; font-size: 11px; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
+    .section-note { color: #58677b; font-size: 11px; }
+    .examples { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .prompt-card {
+      min-height: 86px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      color: #b9c4d3;
+      background: rgba(11,20,36,.58);
+      text-align: left;
+      transition: transform .18s ease, border-color .18s ease, background .18s ease;
+    }
+    .prompt-card:hover { transform: translateY(-2px); border-color: #35465f; background: rgba(16,27,45,.84); }
+    .prompt-icon { display: grid; width: 25px; height: 25px; margin-bottom: 9px; place-items: center; border-radius: 7px; color: #a5b4fc; background: var(--primary-soft); }
+    .prompt-icon svg { width: 14px; height: 14px; }
+    .prompt-text { display: block; font-size: 12px; line-height: 1.5; }
+
+    .run-area { margin-top: 30px; }
+    .history-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 11px; }
+    .history-title { margin: 0; color: #c7d2e1; font-size: 12px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+    .history-subtitle { margin-left: 8px; color: #58677b; font-size: 11px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+    .clear-history { padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; color: #8d9baf; background: rgba(255,255,255,.025); font-size: 11px; }
+    .clear-history:hover:not(:disabled) { border-color: #394b66; color: #d5deea; background: rgba(255,255,255,.05); }
+    .clear-history:disabled { cursor: not-allowed; opacity: .45; }
+    .status-panel { display: none; margin-bottom: 12px; padding: 13px 15px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(11,20,36,.72); }
+    .status-panel.visible { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .status-copy { display: flex; align-items: center; gap: 10px; color: #c5cfdb; font-size: 12px; }
+    .status-orb { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 5px rgba(109,124,255,.1), 0 0 16px rgba(109,124,255,.36); }
+    .status-panel.loading .status-orb { animation: pulse 1.2s ease-in-out infinite; }
+    .status-panel.success .status-orb { background: var(--success); box-shadow: 0 0 0 5px rgba(34,197,94,.1); }
+    .status-panel.error .status-orb { background: var(--danger); box-shadow: 0 0 0 5px rgba(251,113,133,.1); }
+    .status-tag { padding: 3px 8px; border-radius: 999px; color: #8290a4; background: rgba(255,255,255,.035); font: 10px/1.5 "Cascadia Code", Consolas, monospace; }
+
+    .chat-history { display: grid; gap: 14px; }
+    .chat-card { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: rgba(7,15,28,.78); box-shadow: 0 16px 48px rgba(0,0,0,.17); }
+    .question-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 15px 17px; border-bottom: 1px solid var(--line); background: rgba(16,27,45,.52); }
+    .q-icon { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid rgba(109,124,255,.28); border-radius: 9px; color: #c7d2fe; background: var(--primary-soft); font: 700 12px "Cascadia Code", Consolas, monospace; }
+    .q-text { overflow-wrap: anywhere; color: #e6ebf2; font-size: 13px; font-weight: 650; }
+    .q-time { color: #66758a; font: 10px "Cascadia Code", Consolas, monospace; }
+    .chat-card-body { padding: 15px 16px 17px; }
+    .card-status { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: #91a0b5; font-size: 11px; }
+    .card-status::before { content: ""; width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 4px rgba(109,124,255,.09); }
+    .card-status.success::before { background: var(--success); box-shadow: 0 0 0 4px rgba(34,197,94,.09); }
+    .card-status.error::before { background: var(--danger); box-shadow: 0 0 0 4px rgba(251,113,133,.09); }
+    .sql-stream { overflow: hidden; margin-bottom: 13px; border: 1px solid var(--line); border-radius: var(--radius-md); background: #050b16; }
+    .sql-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-bottom: 1px solid var(--line); color: #8796aa; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .sql-live { color: #a5b4fc; font: 9px "Cascadia Code", Consolas, monospace; }
+    .sql-code { min-height: 70px; max-height: 260px; margin: 0; overflow: auto; padding: 13px 14px; border: 0; color: #c7d2fe; background: transparent; font: 11px/1.72 "Cascadia Code", Consolas, monospace; white-space: pre-wrap; }
+    .typing-cursor { display: inline-block; width: 6px; height: 1.15em; margin-left: 2px; vertical-align: -.2em; background: #818cf8; animation: blink .8s steps(1) infinite; }
+    .sql-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 11px; border-top: 1px solid var(--line); background: rgba(16,27,45,.45); }
+    .copy-btn { padding: 5px 9px; border: 1px solid #30415b; border-radius: 7px; color: #aeb9c8; background: rgba(255,255,255,.035); font-size: 10px; }
+    .copy-btn:hover { color: #fff; background: rgba(255,255,255,.07); }
+    .copy-btn.copied { border-color: rgba(34,197,94,.35); color: #86efac; background: var(--success-soft); }
+    .duration { color: #69788d; font: 10px "Cascadia Code", Consolas, monospace; }
+    .step-events { display: grid; gap: 8px; margin-bottom: 12px; }
+    .hidden { display: none !important; }
+    .event { display: flex; align-items: center; gap: 10px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 10px; color: #aeb9c8; background: rgba(11,20,36,.55); font-size: 12px; }
+    .event-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--success); }
+    .event.failed .event-dot { background: var(--danger); }
+    .event.skipped .event-dot { background: var(--warning); }
+    .event-state { margin-left: auto; color: #64748b; font: 10px "Cascadia Code", Consolas, monospace; text-transform: uppercase; }
+
+    .empty-state { display: grid; min-height: 190px; place-items: center; padding: 26px; border: 1px dashed #26354b; border-radius: var(--radius-lg); color: var(--muted); background: rgba(11,20,36,.3); text-align: center; }
+    .empty-icon { display: grid; width: 44px; height: 44px; margin: 0 auto 12px; place-items: center; border: 1px solid var(--line); border-radius: 14px; color: #66758b; background: rgba(255,255,255,.025); }
+    .empty-icon svg { width: 21px; height: 21px; }
+    .empty-state strong { color: #aeb9c8; font-size: 13px; }
+    .empty-state p { margin: 4px 0 0; font-size: 12px; }
+
+    .result-shell { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: rgba(9,17,31,.83); box-shadow: 0 16px 50px rgba(0,0,0,.2); }
+    .result-header { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 17px 20px; border-bottom: 1px solid var(--line); }
+    .result-kicker { color: #7c8ba0; font-size: 10px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+    .result-title { margin: 2px 0 0; font-size: 17px; letter-spacing: -.015em; }
+    .result-badge { padding: 4px 9px; border: 1px solid rgba(34,197,94,.2); border-radius: 999px; color: #86efac; background: var(--success-soft); font-size: 10px; font-weight: 700; }
+    .result-body { padding: 20px; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 18px; }
+    .metric { min-height: 104px; padding: 15px; border: 1px solid var(--line); border-radius: var(--radius-md); background: linear-gradient(145deg, rgba(16,27,45,.88), rgba(11,20,36,.75)); }
+    .metric-label { overflow: hidden; color: #7f8da1; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .metric-value { margin-top: 11px; color: #f1f5f9; font: 600 clamp(18px, 3vw, 24px)/1.2 "Cascadia Code", Consolas, monospace; letter-spacing: -.04em; }
+    .metric-foot { margin-top: 7px; color: #59687c; font-size: 10px; }
+
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); }
+    table { width: 100%; border-collapse: collapse; min-width: 520px; }
+    th, td { padding: 11px 13px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+    th { color: #8f9db0; background: #101b2d; font-size: 10px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+    td { color: #cbd5e1; font: 12px "Cascadia Code", Consolas, monospace; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: rgba(255,255,255,.018); }
+
+    .report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+    .report-card { padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(16,27,45,.58); }
+    .report-card.wide { grid-column: 1 / -1; }
+    .report-card h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: #a5b4fc; font-size: 12px; }
+    .report-card h3 svg { width: 15px; height: 15px; }
+    .report-card p { margin: 0; color: #c5cfdb; font-size: 12px; }
+    .report-card ul { margin: 0; padding-left: 17px; color: #c5cfdb; }
+    .report-card li { margin: 7px 0; padding-left: 3px; font-size: 12px; }
+    .report-card li::marker { color: #7c89ff; }
+
+    details { margin-top: 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgba(5,11,22,.55); }
+    summary { padding: 12px 14px; color: #a6b1c1; cursor: pointer; font-size: 12px; font-weight: 650; }
+    pre { max-height: 390px; margin: 0; overflow: auto; padding: 16px; border-top: 1px solid var(--line); color: #b8c5d9; background: #050b16; font: 11px/1.7 "Cascadia Code", Consolas, monospace; white-space: pre-wrap; }
+    .error-box { display: flex; gap: 11px; padding: 15px; border: 1px solid rgba(251,113,133,.22); border-radius: var(--radius-md); color: #fecdd3; background: var(--danger-soft); }
+    .error-box svg { width: 18px; height: 18px; flex: 0 0 auto; margin-top: 2px; color: var(--danger); }
+
+    @keyframes pulse { 0%,100% { opacity: .55; transform: scale(.84); } 50% { opacity: 1; transform: scale(1); } }
+    @keyframes blink { 0%,48% { opacity: 1; } 49%,100% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; transition-duration: .001ms !important; } }
+    @media (max-width: 1050px) { .examples { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 780px) {
+      :root { --sidebar-width: 0px; }
+      .sidebar { position: static; width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand { height: 64px; }
+      .nav, .sidebar-footer { display: none; }
+      .main { margin-left: 0; }
+      .topbar { min-height: 62px; padding: 10px 18px; }
+      .workspace { width: min(100% - 28px, 720px); padding: 30px 0 52px; }
+      .hero { align-items: flex-start; flex-direction: column; gap: 14px; }
+      .model-pill { align-self: flex-start; }
+      .report-grid { grid-template-columns: 1fr; }
+      .report-card.wide { grid-column: auto; }
+    }
+    @media (max-width: 540px) {
+      .topbar .breadcrumb, .user-chip span { display: none; }
+      .examples { grid-template-columns: 1fr; }
+      .composer-bar { align-items: stretch; flex-direction: column; padding: 12px; }
+      .composer-hint { padding: 0 4px; }
+      .actions { display: grid; grid-template-columns: 1fr 1fr; }
+      .btn { padding: 0 10px; font-size: 12px; }
+      #question { min-height: 118px; padding: 18px; }
+      .result-header, .result-body { padding-left: 14px; padding-right: 14px; }
+      .question-row { grid-template-columns: 30px minmax(0, 1fr); }
+      .q-time { grid-column: 2; }
+      .history-subtitle { display: none; }
+    }
   </style>
 </head>
 <body>
-<header><h1>企业级制造业财务 ChatBI</h1><small>千问 · Milvus · Schema Linking · 指标 RAG · Plan-and-Execute</small></header>
-<main><div class="grid">
-  <section class="card">
-    <textarea id="question" placeholder="例如：最近三个月利润为什么下降？"></textarea>
-    <p><button id="ask">开始分析</button></p><div id="status"></div><div id="events"></div><div id="result"></div>
-  </section>
-  <aside class="card examples"><strong>示例问题</strong>
-    <button>查询上个月的销售额、销售成本及毛利</button>
-    <button>最近三个月利润为什么下降？</button>
-    <button>按产品线统计最近六个月收入和毛利率</button>
-    <button>欧洲和北美最近三个月收入趋势有何不同？</button>
-  </aside>
-</div></main>
-<script>
-const q=document.querySelector('#question'),ask=document.querySelector('#ask'),events=document.querySelector('#events'),result=document.querySelector('#result'),status=document.querySelector('#status');
-document.querySelectorAll('.examples button').forEach(b=>b.onclick=()=>q.value=b.textContent);
-function table(rows){if(!rows?.length)return '<p>结果为空</p>';const cols=Object.keys(rows[0]);return `<table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??''}</td>`).join('')}</tr>`).join('')}</tbody></table>`}
-function render(data){if(data.mode==='agent'){const report=data.report?.markdown||data.report?.executive_summary||'';result.innerHTML=`<h3>分析报告</h3><div class="report">${report}</div><h3>执行计划</h3><pre>${JSON.stringify(data.plan,null,2)}</pre>`}else{result.innerHTML=`<h3>查询结果</h3>${table(data.rows)}<h3>SQL</h3><pre>${data.sql||''}</pre>`}}
-ask.onclick=async()=>{if(!q.value.trim())return;ask.disabled=true;events.innerHTML='';result.innerHTML='';status.textContent='连接服务中…';
- try{const res=await fetch('/api/v1/query/stream',{method:'POST',headers:{'Content-Type':'application/json','x-user-id':'web_user','x-user-role':'analyst'},body:JSON.stringify({question:q.value})});if(!res.ok)throw new Error(await res.text());const reader=res.body.getReader(),decoder=new TextDecoder();let buffer='';while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const chunks=buffer.split('\n\n');buffer=chunks.pop();for(const chunk of chunks){let type='message',payload={};for(const line of chunk.split('\n')){if(line.startsWith('event:'))type=line.slice(6).trim();if(line.startsWith('data:'))payload=JSON.parse(line.slice(5));}if(type==='status'){status.textContent=payload.message}else if(type==='sql_delta'){status.textContent='正在生成 SQL…'}else if(type==='step'){events.insertAdjacentHTML('beforeend',`<div class="event">${payload.step_name}: ${payload.status||''}</div>`)}else if(type==='result'){render(payload)}else if(type==='error'){result.innerHTML=`<div class="error">${payload.error||'查询失败'}</div>`}}}status.textContent='完成';}catch(e){result.innerHTML=`<div class="error">${e.message}</div>`}finally{ask.disabled=false}}
-</script>
-</body></html>
+  <div class="app">
+    <aside class="sidebar" aria-label="主导航">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 17.5V14m5 3.5V10m5 7.5V6m5 11.5V3"/><path d="M3 21h18"/></svg>
+        </div>
+        <div><div class="brand-name">ChatBI</div><div class="brand-tag">DATA INTELLIGENCE</div></div>
+      </div>
+      <nav class="nav">
+        <div class="nav-label">Workspace</div>
+        <button class="nav-item active" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 13h6V4H4v9Zm10 7h6v-9h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z"/></svg>
+          智能分析
+        </button>
+        <button class="nav-item disabled" type="button" aria-disabled="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg>
+          分析看板
+        </button>
+        <button class="nav-item disabled" type="button" aria-disabled="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+          语义资产
+        </button>
+        <div class="nav-label" style="margin-top:20px">System</div>
+        <button class="nav-item disabled" type="button" aria-disabled="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+          系统设置
+        </button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="service-card">
+          <div class="service-row"><span class="service-title">服务状态</span><span class="online-dot" aria-label="在线"></span></div>
+          <div class="service-meta">Qwen · Milvus · MySQL</div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div><div class="breadcrumb">工作台 / 智能分析</div><div class="topbar-title">企业经营分析中心</div></div>
+        <div class="user-chip"><span>数据分析员</span><div class="avatar" aria-hidden="true">BI</div></div>
+      </header>
+
+      <div class="workspace">
+        <section class="hero">
+          <div>
+            <div class="eyebrow">AI Analytics Copilot</div>
+            <h1>向数据提问，获得可信答案</h1>
+            <p>用自然语言查询经营指标，自动完成 Schema Linking、指标口径匹配、安全 SQL 与多步骤分析。</p>
+          </div>
+          <div class="model-pill">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v3m0 12v3M3 12h3m12 0h3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1m0-12.8-2.1 2.1m-8.6 8.6-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg>
+            QWEN-PLUS · ONLINE
+          </div>
+        </section>
+
+        <section class="composer" aria-label="数据问题输入">
+          <textarea id="question" placeholder="例如：最近三个月利润为什么下降？" maxlength="1000"></textarea>
+          <div id="contextStrip" class="context-strip">
+            <span class="context-copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 12h8m-4-4v8"/><circle cx="12" cy="12" r="9"/></svg><span>已关联上一轮分析，本轮将作为追问</span></span>
+            <button id="clearContext" class="context-clear" type="button">清除上下文</button>
+          </div>
+          <div class="composer-bar">
+            <div class="composer-hint">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 18h.01M9.1 8.9a3 3 0 1 1 4.9 2.3c-1.3 1-2 1.5-2 2.8"/><circle cx="12" cy="12" r="9"/></svg>
+              Enter 提交，Shift + Enter 换行
+            </div>
+            <div class="actions">
+              <button id="ask" class="btn btn-primary" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="m4 4 16 7-7 3-3 6-6-16Z"/><path d="m10 14 4-4"/></svg>
+                智能查询
+              </button>
+              <button id="report" class="btn btn-secondary" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 3h7l4 4v14H7V3Z"/><path d="M14 3v5h5M10 13h5m-5 4h5"/></svg>
+                生成报告
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="quick-section">
+          <div class="section-head"><h2 class="section-title">快捷问题</h2><span class="section-note">点击填入问题</span></div>
+          <div class="examples">
+            <button class="prompt-card" type="button"><span class="prompt-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m5 10V5m5 14v-7m5 7V3"/></svg></span><span class="prompt-text">查询上个月的销售额、销售成本及毛利</span></button>
+            <button class="prompt-card" type="button"><span class="prompt-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m3 17 6-6 4 4 8-9"/><path d="M15 6h6v6"/></svg></span><span class="prompt-text">最近三个月利润为什么下降？</span></button>
+            <button class="prompt-card" type="button"><span class="prompt-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="7" r="3"/><circle cx="7" cy="17" r="3"/><circle cx="17" cy="17" r="3"/></svg></span><span class="prompt-text">按产品线统计最近六个月收入和毛利率</span></button>
+            <button class="prompt-card" type="button"><span class="prompt-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></span><span class="prompt-text">欧洲和北美最近三个月收入趋势有何不同？</span></button>
+          </div>
+        </section>
+
+        <section class="run-area">
+          <div class="history-head">
+            <h2 class="history-title">查询历史<span class="history-subtitle">最新查询优先展示</span></h2>
+            <button id="clearHistory" class="clear-history" type="button">清空历史</button>
+          </div>
+          <div id="statusPanel" class="status-panel"><div class="status-copy"><span class="status-orb"></span><span id="status">等待提问</span></div><span id="statusTag" class="status-tag">IDLE</span></div>
+          <div id="chatHistory" class="chat-history" aria-live="polite">
+            <div class="empty-state history-empty"><div><span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18V9m5 9V5m5 13v-6m5 6V3"/><path d="M3 21h18"/></svg></span><strong>分析结果将在这里呈现</strong><p>选择快捷问题，或输入你的经营分析问题</p></div></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const q = document.querySelector('#question');
+    const ask = document.querySelector('#ask');
+    const report = document.querySelector('#report');
+    const chatHistory = document.querySelector('#chatHistory');
+    const clearHistory = document.querySelector('#clearHistory');
+    const status = document.querySelector('#status');
+    const statusPanel = document.querySelector('#statusPanel');
+    const statusTag = document.querySelector('#statusTag');
+    const contextStrip = document.querySelector('#contextStrip');
+    const clearContext = document.querySelector('#clearContext');
+    let conversationContext = '';
+
+    const icons = {
+      summary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 12h18"/><circle cx="12" cy="12" r="9"/></svg>',
+      finding: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m4 17 5-5 4 3 7-9"/><path d="M15 6h5v5"/></svg>',
+      cause: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5M11 8v6m-3-3h6"/></svg>',
+      trend: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18 10 12l4 3 6-8"/></svg>',
+      action: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6m-5 3h4M8.5 14.5A7 7 0 1 1 16 14c-.8.6-1 1.2-1 2H9c0-.7-.1-1.1-.5-1.5Z"/></svg>',
+      error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></svg>'
+    };
+
+    const emptyHistoryMarkup = '<div class="empty-state history-empty"><div><span class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 18V9m5 9V5m5 13v-6m5 6V3"/><path d="M3 21h18"/></svg></span><strong>分析结果将在这里呈现</strong><p>选择快捷问题，或输入你的经营分析问题</p></div></div>';
+    const escapeHtml = (value) => String(value ?? '')
+      .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+    const formatValue = (value) => {
+      if (typeof value === 'number') return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value);
+      return String(value ?? '—');
+    };
+    const formatTime = (ms) => ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+    const listHtml = (items) => `<ul>${(items || []).map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+
+    document.querySelectorAll('.prompt-card').forEach(button => {
+      button.addEventListener('click', () => {
+        resetConversationContext();
+        q.value = button.querySelector('.prompt-text').textContent;
+        q.focus();
+      });
+    });
+    clearContext.addEventListener('click', resetConversationContext);
+    clearHistory.addEventListener('click', () => {
+      chatHistory.innerHTML = emptyHistoryMarkup;
+      resetConversationContext();
+      statusPanel.className = 'status-panel';
+      status.textContent = '等待提问';
+      statusTag.textContent = 'IDLE';
+    });
+    q.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); runQuery(false); }
+    });
+
+    function setStatus(message, state = 'loading', tag = 'RUNNING') {
+      status.textContent = message;
+      statusTag.textContent = tag;
+      statusPanel.className = `status-panel visible ${state}`;
+    }
+
+    function setRunning(running) {
+      ask.disabled = running;
+      report.disabled = running;
+      clearHistory.disabled = running;
+    }
+
+    function resetConversationContext() {
+      conversationContext = '';
+      contextStrip.classList.remove('visible');
+    }
+
+    function createQueryCard(question) {
+      chatHistory.querySelector('.history-empty')?.remove();
+      const card = document.createElement('article');
+      card.className = 'chat-card';
+      const currentTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      card.innerHTML = `
+        <header class="question-row">
+          <div class="q-icon" aria-hidden="true">Q</div>
+          <div class="q-text">${escapeHtml(question)}</div>
+          <time class="q-time">${escapeHtml(currentTime)}</time>
+        </header>
+        <div class="chat-card-body">
+          <div class="card-status" role="status">正在连接分析服务…</div>
+          <section class="sql-stream hidden" aria-label="SQL 流式输出">
+            <div class="sql-head"><span>生成的 SQL</span><span class="sql-live">STREAMING</span></div>
+            <pre class="sql-code"></pre>
+            <div class="sql-toolbar hidden">
+              <button class="copy-btn" type="button">复制 SQL</button>
+              <span class="duration"></span>
+            </div>
+          </section>
+          <div class="step-events"></div>
+          <div class="card-result"></div>
+        </div>`;
+      chatHistory.insertBefore(card, chatHistory.firstChild);
+      return {
+        card,
+        cardStatus: card.querySelector('.card-status'),
+        sqlStream: card.querySelector('.sql-stream'),
+        sqlLive: card.querySelector('.sql-live'),
+        sqlCode: card.querySelector('.sql-code'),
+        sqlToolbar: card.querySelector('.sql-toolbar'),
+        copyBtn: card.querySelector('.copy-btn'),
+        duration: card.querySelector('.duration'),
+        stepEvents: card.querySelector('.step-events'),
+        result: card.querySelector('.card-result')
+      };
+    }
+
+    function updateCardStatus(card, message, state = 'loading') {
+      card.cardStatus.textContent = message;
+      card.cardStatus.className = `card-status ${state}`;
+    }
+
+    function renderTable(rows) {
+      if (!rows?.length) return '<div class="empty-state"><div><strong>查询成功，但未找到匹配的数据</strong><p>可调整时间范围或分析维度后重试</p></div></div>';
+      const columns = Object.keys(rows[0]);
+      return `<div class="table-wrap"><table><thead><tr>${columns.map(column => `<th>${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(column => `<td>${escapeHtml(formatValue(row[column]))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    }
+
+    function renderMetrics(rows) {
+      if (rows?.length !== 1) return '';
+      const entries = Object.entries(rows[0]).filter(([, value]) => typeof value === 'number').slice(0, 6);
+      if (!entries.length) return '';
+      return `<div class="metrics">${entries.map(([label, value]) => `<article class="metric"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(formatValue(value))}</div><div class="metric-foot">查询结果 · 当前口径</div></article>`).join('')}</div>`;
+    }
+
+    function renderText2Sql(container, data) {
+      container.innerHTML = `<article class="result-shell"><header class="result-header"><div><div class="result-kicker">Text-to-SQL Result</div><h2 class="result-title">查询结果</h2></div><span class="result-badge">已验证</span></header><div class="result-body">${renderMetrics(data.rows)}${renderTable(data.rows)}</div></article>`;
+    }
+
+    function renderAgent(container, data) {
+      const r = data.report || {};
+      container.innerHTML = `<article class="result-shell"><header class="result-header"><div><div class="result-kicker">Agent Analysis Report</div><h2 class="result-title">${escapeHtml(r.title || '分析报告')}</h2></div><span class="result-badge">证据约束</span></header><div class="result-body"><div class="report-grid"><section class="report-card wide"><h3>${icons.summary}执行摘要</h3><p>${escapeHtml(r.executive_summary || '')}</p></section><section class="report-card"><h3>${icons.finding}关键发现</h3>${listHtml(r.key_findings)}</section><section class="report-card"><h3>${icons.cause}归因分析</h3>${listHtml(r.root_causes)}</section><section class="report-card"><h3>${icons.trend}趋势判断</h3><p>${escapeHtml(r.trend_judgment || '')}</p></section><section class="report-card"><h3>${icons.action}行动建议</h3>${listHtml(r.action_suggestions)}</section></div><details><summary>查看 Agent 执行计划</summary><pre>${escapeHtml(JSON.stringify(data.plan, null, 2))}</pre></details></div></article>`;
+    }
+
+    function renderError(container, message) {
+      container.innerHTML = `<div class="error-box">${icons.error}<div><strong>本次分析未完成</strong><div>${escapeHtml(message || '查询失败，请稍后重试')}</div></div></div>`;
+    }
+
+    function rememberResult(data) {
+      const context = data.mode === 'agent'
+        ? {
+            previous_question: data.question,
+            report: data.report ? {
+              executive_summary: data.report.executive_summary,
+              key_findings: data.report.key_findings,
+              root_causes: data.report.root_causes,
+              trend_judgment: data.report.trend_judgment,
+              action_suggestions: data.report.action_suggestions
+            } : null,
+            evidence: (data.step_results || []).filter(step => step.success).slice(0, 6).map(step => ({
+              step_name: step.step_name,
+              columns: step.columns,
+              rows: (step.rows || []).slice(0, 5)
+            }))
+          }
+        : {
+            previous_question: data.question,
+            sql: data.sql,
+            columns: data.columns,
+            rows: (data.rows || []).slice(0, 10)
+          };
+      conversationContext = JSON.stringify(context).slice(0, 12000);
+      contextStrip.classList.add('visible');
+    }
+
+    function addEvent(container, payload) {
+      const state = payload.status || 'running';
+      const item = document.createElement('div');
+      item.className = `event ${state}`;
+      item.innerHTML = `<span class="event-dot"></span><span>${escapeHtml(payload.step_name || '执行步骤')}</span><span class="event-state">${escapeHtml(state)}</span>`;
+      container.appendChild(item);
+    }
+
+    async function runQuery(forceComplex = false) {
+      const question = q.value.trim();
+      if (!question) { q.focus(); setStatus('请先输入一个分析问题', 'error', 'INPUT'); return; }
+
+      const card = createQueryCard(question);
+      const started = performance.now();
+      let fullSql = '';
+      let hadError = false;
+      let gotResult = false;
+      setRunning(true);
+      setStatus(forceComplex ? '正在启动 Plan-and-Execute Agent…' : '正在连接分析服务…');
+
+      card.copyBtn.addEventListener('click', async () => {
+        if (!fullSql) return;
+        try {
+          await navigator.clipboard.writeText(fullSql);
+          card.copyBtn.textContent = '已复制';
+          card.copyBtn.classList.add('copied');
+          setTimeout(() => {
+            card.copyBtn.textContent = '复制 SQL';
+            card.copyBtn.classList.remove('copied');
+          }, 2000);
+        } catch {
+          card.copyBtn.textContent = '复制失败';
+        }
+      });
+
+      const showSql = (sql, streaming, durationMs) => {
+        fullSql = sql;
+        card.sqlStream.classList.remove('hidden');
+        card.sqlLive.textContent = streaming ? 'STREAMING' : 'READY';
+        card.sqlCode.textContent = fullSql;
+        if (streaming) {
+          const cursor = document.createElement('span');
+          cursor.className = 'typing-cursor';
+          card.sqlCode.appendChild(cursor);
+        } else {
+          card.sqlToolbar.classList.remove('hidden');
+          card.duration.textContent = `SQL 生成 ${formatTime(durationMs ?? (performance.now() - started))}`;
+        }
+      };
+
+      try {
+        const response = await fetch('/api/v1/query/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-user-id': 'web_user', 'x-user-role': 'analyst' },
+          body: JSON.stringify({
+            question,
+            force_complex: forceComplex,
+            conversation_context: conversationContext || null
+          })
+        });
+        if (!response.ok) throw new Error(await response.text());
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const chunks = buffer.split('\n\n');
+          buffer = chunks.pop();
+          for (const chunk of chunks) {
+            let type = 'message';
+            const dataLines = [];
+            for (const line of chunk.split('\n')) {
+              if (line.startsWith('event:')) type = line.slice(6).trim();
+              else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+            }
+            const payload = dataLines.length ? JSON.parse(dataLines.join('\n')) : {};
+            if (type === 'status') {
+              const message = payload.message || '正在分析…';
+              setStatus(message);
+              updateCardStatus(card, message);
+            } else if (type === 'sql_chunk') {
+              if (!payload.content) continue;
+              fullSql += payload.content;
+              showSql(fullSql, true);
+              setStatus('正在生成 SQL…');
+              updateCardStatus(card, '正在生成 SQL…');
+            } else if (type === 'sql_done') {
+              showSql(payload.sql || fullSql, false, payload.duration_ms);
+              updateCardStatus(card, '已生成 SQL，正在执行安全查询…');
+            } else if (type === 'step') {
+              addEvent(card.stepEvents, payload);
+            } else if (type === 'result') {
+              gotResult = true;
+              payload.mode === 'agent' ? renderAgent(card.result, payload) : renderText2Sql(card.result, payload);
+              rememberResult(payload);
+              const total = performance.now() - started;
+              updateCardStatus(card, `查询完成，总耗时 ${formatTime(total)}`, 'success');
+            } else if (type === 'error') {
+              hadError = true;
+              if (payload.sql && !fullSql) showSql(payload.sql, false, payload.duration_ms);
+              renderError(card.result, payload.error);
+              updateCardStatus(card, `查询失败 · ${formatTime(performance.now() - started)}`, 'error');
+            }
+          }
+        }
+        if (hadError) setStatus('分析失败，请查看错误信息', 'error', 'FAILED');
+        else if (gotResult) setStatus(`分析完成 · ${formatTime(performance.now() - started)}`, 'success', 'COMPLETED');
+        else {
+          renderError(card.result, '服务未返回分析结果');
+          updateCardStatus(card, '服务未返回分析结果', 'error');
+          setStatus('服务未返回分析结果', 'error', 'EMPTY');
+        }
+      } catch (error) {
+        renderError(card.result, error.message);
+        updateCardStatus(card, `连接或分析失败 · ${formatTime(performance.now() - started)}`, 'error');
+        setStatus('连接或分析过程发生错误', 'error', 'FAILED');
+      } finally {
+        setRunning(false);
+      }
+    }
+
+    ask.addEventListener('click', () => runQuery(false));
+    report.addEventListener('click', () => runQuery(true));
+  </script>
+</body>
+</html>

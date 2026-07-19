@@ -103,7 +103,13 @@ FIELD_RULES = [
     },
     {
         "type": "whitelist",
-        "trigger_keywords": ["毛利", "利润", "毛利率", "利润率"],
+        "trigger_keywords": ["毛利", "毛利率"],
+        "force_include": ["sales_orders.net_amount", "sales_orders.order_date", "sales_orders.order_status", "sales_orders.currency", "exchange_rates.rate_date", "exchange_rates.currency", "exchange_rates.rate_to_cny"],
+        "reason": "毛利类指标需要收入、汇率和订单状态字段，不涉及期间费用",
+    },
+    {
+        "type": "whitelist",
+        "trigger_keywords": ["利润", "利润率"],
         "force_include": ["sales_orders.net_amount", "sales_orders.order_date", "sales_orders.order_status", "sales_orders.currency", "exchange_rates.rate_date", "exchange_rates.currency", "exchange_rates.rate_to_cny", "finance_expenses.expense_date"],
         "reason": "利润类指标需要收入、汇率、状态与费用时间字段",
     },

@@ -7,6 +7,7 @@ from database import DatabaseClient
 from indicator_knowledge import IndicatorKnowledge
 from indicator_retriever import IndicatorRetriever
 from llm_client import LLMClient
+from obsidian_indicator_store import ObsidianIndicatorStore
 from query_parser import QueryParser
 from result_formatter import ResultFormatter
 from schema_linking import SchemaLinkingPipeline
@@ -34,6 +35,7 @@ def build_runtime(
     source_id: str | None = None,
 ) -> AppRuntime:
     resolved_config = app_config.for_source(source_id)
+    indicator_store = ObsidianIndicatorStore(resolved_config)
     return AppRuntime(
         source_id=resolved_config.data_source_name,
         parser=QueryParser(),
@@ -41,6 +43,6 @@ def build_runtime(
         db=DatabaseClient(resolved_config),
         formatter=ResultFormatter(),
         schema_linker=SchemaLinkingPipeline(resolved_config),
-        indicator_knowledge=IndicatorKnowledge(),
-        indicator_retriever=IndicatorRetriever(resolved_config),
+        indicator_knowledge=IndicatorKnowledge(resolved_config, indicator_store),
+        indicator_retriever=IndicatorRetriever(resolved_config, indicator_store),
     )

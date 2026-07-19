@@ -29,6 +29,9 @@ class MilvusVectorStore:
     def rebuild(self, documents: list[Document], ids: list[str]) -> None:
         if len(documents) != len(ids):
             raise ValueError("documents 与 ids 数量不一致")
+        # Generate embeddings before replacing the active collection. A Qwen
+        # failure must not turn a healthy collection into an empty one.
+        vectors = self.embeddings.embed_documents([document.page_content for document in documents])
         if self.client.has_collection(self.collection_name):
             self.client.drop_collection(self.collection_name)
         schema = MilvusClient.create_schema(auto_id=True, enable_dynamic_field=True)
@@ -48,7 +51,6 @@ class MilvusVectorStore:
             index_params=index_params,
             consistency_level="Strong",
         )
-        vectors = self.embeddings.embed_documents([document.page_content for document in documents])
         rows = []
         for document_id, document, vector in zip(ids, documents, vectors):
             rows.append(
@@ -60,6 +62,10 @@ class MilvusVectorStore:
                 }
             )
         self.client.insert(self.collection_name, rows)
+        # Seal persisted data before reporting the rebuild as complete. This
+        # also makes row counts and post-restart checks deterministic.
+        self.client.flush(self.collection_name)
+        self.client.load_collection(self.collection_name)
 
     def similarity_search_with_relevance_scores(
         self, query: str, k: int = 4, filter_expression: str = ""
@@ -103,6 +109,53 @@ def list_collections(config: AppConfig = settings) -> list[str]:
     client = MilvusClient(**connection_args(config))
     try:
         return client.list_collections()
+    finally:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+
+
+def inspect_collections(config: AppConfig = settings) -> dict[str, dict[str, Any]]:
+    """Verify that every semantic collection is present, loaded and readable."""
+    client = MilvusClient(**connection_args(config))
+    result: dict[str, dict[str, Any]] = {}
+    try:
+        existing = set(client.list_collections())
+        for kind, collection_name in config.milvus.collections.items():
+            detail: dict[str, Any] = {
+                "collection": collection_name,
+                "healthy": False,
+                "loaded": False,
+                "readable": False,
+                "row_count": 0,
+                "error": None,
+            }
+            if collection_name not in existing:
+                detail["error"] = "collection_missing"
+                result[kind] = detail
+                continue
+            try:
+                client.load_collection(collection_name)
+                state = client.get_load_state(collection_name).get("state")
+                detail["loaded"] = "Loaded" in str(state)
+                stats = client.get_collection_stats(collection_name)
+                detail["row_count"] = int(stats.get("row_count", 0))
+                sample = client.query(
+                    collection_name=collection_name,
+                    filter="",
+                    output_fields=["document_id"],
+                    limit=1,
+                )
+                detail["readable"] = bool(sample)
+                detail["healthy"] = bool(
+                    detail["loaded"] and detail["readable"] and detail["row_count"] > 0
+                )
+                if not detail["healthy"]:
+                    detail["error"] = "collection_not_ready"
+            except Exception as exc:
+                detail["error"] = f"{type(exc).__name__}: {exc}"
+            result[kind] = detail
+        return result
     finally:
         close = getattr(client, "close", None)
         if callable(close):

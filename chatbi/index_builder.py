@@ -6,7 +6,7 @@ from langchain_core.documents import Document
 
 from config import AppConfig, settings
 from indicator_metadata import INDICATOR_DEFINITIONS
-from milvus_store import chunk_text, list_collections, rebuild_collection
+from milvus_store import chunk_text, inspect_collections, rebuild_collection
 from schema_metadata import FIELD_METADATA, TABLE_METADATA
 
 
@@ -59,15 +59,14 @@ def build_indicator_index(config: AppConfig = settings) -> int:
 
 
 def ensure_indexes(config: AppConfig = settings, force_rebuild: bool = False) -> dict[str, int]:
-    existing = set(list_collections(config))
+    health = inspect_collections(config)
     result = {}
     for kind, builder in (
         ("tables", build_table_index),
         ("fields", build_field_index),
         ("indicators", build_indicator_index),
     ):
-        collection = config.milvus.collections[kind]
-        if force_rebuild or collection not in existing:
+        if force_rebuild or not health[kind]["healthy"]:
             result[kind] = builder(config)
         else:
             result[kind] = -1

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Generator
 from typing import Any
@@ -13,6 +14,10 @@ from query_parser import QueryParser
 from result_formatter import ResultFormatter
 from runtime_factory import AppRuntime, build_runtime
 from schema_linking import SchemaLinkingPipeline
+from semantic_policy import SemanticPolicyError, apply_semantic_policy
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChatBISystem:
@@ -61,25 +66,40 @@ class ChatBISystem:
         user_question: str,
         use_indicator_knowledge: bool,
         use_indicator_rag: bool,
-    ) -> tuple[list[str], str]:
+    ) -> tuple[list[str], str, dict]:
         detected_indicators: list[str] = []
         indicator_block = ""
+        resolution: dict = {}
         if use_indicator_rag:
             try:
                 indicator_block, indicators = runtime.indicator_retriever.build_knowledge_block(user_question)
                 detected_indicators = [item["name"] for item in indicators]
+                resolution = dict(runtime.indicator_retriever.last_resolution)
             except Exception:
                 detected_indicators = []
                 indicator_block = ""
+                resolution = {}
             if use_indicator_knowledge and not indicator_block:
                 context = runtime.indicator_knowledge.get_indicator_context(user_question)
                 detected_indicators = context["detected_indicators"]
                 indicator_block = context["indicator_block"]
+                resolution = {
+                    "source": context.get("indicator_source", ""),
+                    "resolved": detected_indicators,
+                    "dependency_graph": context.get("dependency_graph", {}),
+                    "dependency_paths": context.get("dependency_paths", {}),
+                }
         elif use_indicator_knowledge:
             context = runtime.indicator_knowledge.get_indicator_context(user_question)
             detected_indicators = context["detected_indicators"]
             indicator_block = context["indicator_block"]
-        return detected_indicators, indicator_block
+            resolution = {
+                "source": context.get("indicator_source", ""),
+                "resolved": detected_indicators,
+                "dependency_graph": context.get("dependency_graph", {}),
+                "dependency_paths": context.get("dependency_paths", {}),
+            }
+        return detected_indicators, indicator_block, resolution
 
     def _get_runtime(self, source_id: str | None = None) -> AppRuntime:
         resolved = source_id or self.runtime.source_id
@@ -113,19 +133,21 @@ class ChatBISystem:
         if not runtime.parser.validate(parsed):
             return QueryResult(success=False, question=user_question, error="输入问题为空", error_type="validation")
         try:
+            policy = apply_semantic_policy(user_question)
+            effective_question = policy.effective_question
             linking = (
-                runtime.schema_linker.link(user_question)
+                runtime.schema_linker.link(effective_question)
                 if options.use_schema_linking
                 else self._full_schema_fallback()
             )
-            detected_indicators, indicator_context = self._resolve_indicator_context(
+            detected_indicators, indicator_context, indicator_resolution = self._resolve_indicator_context(
                 runtime,
-                user_question,
+                effective_question,
                 options.use_indicator_knowledge,
                 options.use_indicator_rag,
             )
             system_msg, prompt = build_prompt(
-                user_question,
+                effective_question,
                 linking["schema_context"],
                 indicator_context,
                 use_few_shot=options.use_few_shot,
@@ -147,7 +169,7 @@ class ChatBISystem:
                     ):
                         raise
                     sql = runtime.llm.repair_sql(
-                        user_question,
+                        effective_question,
                         sql,
                         f"{exc.error_type}: {exc}",
                         prompt,
@@ -167,11 +189,21 @@ class ChatBISystem:
                     "selected_tables": linking["selected_tables"],
                     "matched_fields": [item["field_key"] for item in linking["fields"]],
                     "matched_indicators": detected_indicators,
+                    "indicator_resolution": indicator_resolution,
                     "join_plan": linking["join_plan"],
                     "query_info": runtime.db.last_query_info,
                     "sql_attempts": sql_attempts,
                     "prompt_context": prompt,
+                    "effective_question": effective_question,
+                    "semantic_adjustment": policy.metadata(),
                 },
+            )
+        except SemanticPolicyError as exc:
+            return QueryResult(
+                success=False,
+                question=user_question,
+                error=str(exc),
+                error_type="validation",
             )
         except LLMError as exc:
             return QueryResult(success=False, question=user_question, error=str(exc), error_type="llm")
@@ -184,6 +216,15 @@ class ChatBISystem:
                 error_type=self._database_error_type(exc.error_type),
                 metadata=exc.metadata,
             )
+        except Exception:
+            logger.exception("Unexpected ChatBI query failure")
+            return QueryResult(
+                success=False,
+                question=user_question,
+                sql=locals().get("sql", ""),
+                error="系统处理失败，请检查向量检索服务与应用日志",
+                error_type="internal",
+            )
 
     def run_stream(
         self,
@@ -192,6 +233,7 @@ class ChatBISystem:
         security_context: UserContext | None = None,
         source_id: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
+        started = time.perf_counter()
         options = options or QueryOptions()
         runtime = self._get_runtime(source_id)
         parsed = runtime.parser.parse(user_question)
@@ -199,20 +241,31 @@ class ChatBISystem:
             yield {"event": "error", "data": {"error": "输入问题为空", "error_type": "validation"}}
             return
         try:
+            policy = apply_semantic_policy(user_question)
+            effective_question = policy.effective_question
+            if policy.adjusted:
+                yield {
+                    "event": "status",
+                    "data": {
+                        "stage": "semantic_policy",
+                        "message": policy.reason,
+                        "effective_question": effective_question,
+                    },
+                }
             yield {"event": "status", "data": {"stage": "schema_linking", "message": "正在检索表、字段与指标"}}
             linking = (
-                runtime.schema_linker.link(user_question)
+                runtime.schema_linker.link(effective_question)
                 if options.use_schema_linking
                 else self._full_schema_fallback()
             )
-            detected_indicators, indicator_context = self._resolve_indicator_context(
+            detected_indicators, indicator_context, indicator_resolution = self._resolve_indicator_context(
                 runtime,
-                user_question,
+                effective_question,
                 options.use_indicator_knowledge,
                 options.use_indicator_rag,
             )
             system_msg, prompt = build_prompt(
-                user_question,
+                effective_question,
                 linking["schema_context"],
                 indicator_context,
                 options.use_few_shot,
@@ -220,12 +273,19 @@ class ChatBISystem:
                 options.use_guards,
             )
             yield {"event": "status", "data": {"stage": "sql_generation", "message": "正在生成 SQL"}}
+            sql_started = time.perf_counter()
             raw_parts = []
             for token in runtime.llm.generate_sql_stream(system_msg, prompt):
+                if not token:
+                    continue
                 raw_parts.append(token)
-                yield {"event": "sql_delta", "data": {"content": token}}
+                yield {"event": "sql_chunk", "data": {"content": token}}
             sql = runtime.llm.extract_sql("".join(raw_parts))
-            yield {"event": "sql", "data": {"sql": sql}}
+            sql_generation_duration_ms = round((time.perf_counter() - sql_started) * 1000, 2)
+            yield {
+                "event": "sql_done",
+                "data": {"sql": sql, "duration_ms": sql_generation_duration_ms},
+            }
             yield {"event": "status", "data": {"stage": "execution", "message": "正在执行安全查询"}}
             sql_attempts = 1
             while True:
@@ -247,13 +307,22 @@ class ChatBISystem:
                         },
                     }
                     sql = runtime.llm.repair_sql(
-                        user_question,
+                        effective_question,
                         sql,
                         f"{exc.error_type}: {exc}",
                         prompt,
                     )
                     sql_attempts += 1
-                    yield {"event": "sql", "data": {"sql": sql, "attempt": sql_attempts}}
+                    yield {
+                        "event": "sql_done",
+                        "data": {
+                            "sql": sql,
+                            "attempt": sql_attempts,
+                            "repaired": True,
+                            "duration_ms": round((time.perf_counter() - sql_started) * 1000, 2),
+                        },
+                    }
+            total_duration_ms = round((time.perf_counter() - started) * 1000, 2)
             result = QueryResult(
                 success=True,
                 question=user_question,
@@ -266,11 +335,24 @@ class ChatBISystem:
                     "source_id": runtime.source_id,
                     "selected_tables": linking["selected_tables"],
                     "matched_indicators": detected_indicators,
+                    "indicator_resolution": indicator_resolution,
                     "sql_attempts": sql_attempts,
+                    "sql_generation_duration_ms": sql_generation_duration_ms,
+                    "duration_ms": total_duration_ms,
+                    "query_info": runtime.db.last_query_info,
+                    "effective_question": effective_question,
+                    "semantic_adjustment": policy.metadata(),
                 },
             )
-            yield {"event": "result", "data": result.model_dump()}
-        except (LLMError, QueryExecutionError) as exc:
+            yield {
+                "event": "result",
+                "data": {
+                    **result.model_dump(),
+                    "row_count": len(rows),
+                    "duration_ms": total_duration_ms,
+                },
+            }
+        except (SemanticPolicyError, LLMError, QueryExecutionError) as exc:
             yield {
                 "event": "error",
                 "data": {
@@ -278,12 +360,30 @@ class ChatBISystem:
                     "error_type": (
                         self._database_error_type(exc.error_type)
                         if isinstance(exc, QueryExecutionError)
+                        else "validation"
+                        if isinstance(exc, SemanticPolicyError)
                         else "llm"
                     ),
+                    "sql": locals().get("sql", ""),
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            }
+        except Exception:
+            logger.exception("Unexpected ChatBI streaming query failure")
+            yield {
+                "event": "error",
+                "data": {
+                    "error": "系统处理失败，请检查向量检索服务与应用日志",
+                    "error_type": "internal",
+                    "sql": locals().get("sql", ""),
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
                 },
             }
         finally:
-            yield {"event": "done", "data": {}}
+            yield {
+                "event": "done",
+                "data": {"duration_ms": round((time.perf_counter() - started) * 1000, 2)},
+            }
 
     @staticmethod
     def _full_schema_fallback() -> dict:

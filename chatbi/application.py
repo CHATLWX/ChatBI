@@ -26,12 +26,17 @@ class ChatBIApplication:
         user: UserContext,
         force_complex: bool = False,
         source_id: str | None = None,
+        conversation_context: str = "",
     ) -> dict:
-        if force_complex or (self.config.features.agent_planning and self.is_complex(question)):
-            result = self.agent.run(question, options, user, source_id)
-            return {"mode": "agent", **result.model_dump()}
+        if force_complex or conversation_context or (self.config.features.agent_planning and self.is_complex(question)):
+            result = self.agent.run(question, options, user, source_id, conversation_context)
+            payload = {"mode": "agent", **result.model_dump()}
+            payload["duration_ms"] = payload.get("metadata", {}).get("duration_ms", 0)
+            return payload
         result = self.system.run(question, options, user, source_id=source_id)
-        return {"mode": "text2sql", **result.model_dump()}
+        payload = {"mode": "text2sql", **result.model_dump()}
+        payload["duration_ms"] = payload.get("metadata", {}).get("duration_ms", 0)
+        return payload
 
     def close(self) -> None:
         self.agent.close()

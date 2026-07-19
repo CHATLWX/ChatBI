@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import date, datetime
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import unquote
 
 from fastapi import FastAPI, HTTPException, Request
@@ -13,11 +15,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from application import ChatBIApplication
 from config import AppConfig, settings
+from database import DatabaseClient
 from index_builder import ensure_indexes
+from milvus_store import inspect_collections
 from models import QueryOptions, UserContext
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
@@ -35,14 +39,30 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app.get("name", "Enterprise ChatBI"),
     version=settings.app.get("version", "1.0.0"),
-    description="Schema Linking + 指标 RAG + Plan-and-Execute 的企业级 ChatBI。",
+    description="""Schema Linking + 指标 RAG + Plan-and-Execute 的企业级 ChatBI。
+
+SSE 流式接口事件契约：
+
+| 事件 | 说明 | data 主要字段 |
+| --- | --- | --- |
+| `sql_chunk` | SQL 增量文本 | `content` |
+| `sql_done` | 完整 SQL | `sql`, `duration_ms` |
+| `result` | 查询结果 | `columns`, `rows`, `row_count` |
+| `error` | 异常信息 | `error`, `error_type`, `sql` |
+| `done` | 流结束 | `duration_ms` |
+""",
+    openapi_tags=[
+        {"name": "查询", "description": "自然语言查询与 SSE 流式分析接口"},
+        {"name": "系统", "description": "服务、数据库和语义检索健康状态"},
+    ],
     lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost", "http://127.0.0.1"],
+    allow_origin_regex=r"^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?$",
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -50,6 +70,7 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=1000)
     force_complex: bool = False
+    conversation_context: str | None = Field(default=None, max_length=12000)
     source_id: str | None = None
     use_few_shot: bool | None = None
     use_rules: bool | None = None
@@ -57,6 +78,40 @@ class QueryRequest(BaseModel):
     use_indicator_knowledge: bool | None = None
     use_schema_linking: bool | None = None
     use_indicator_rag: bool | None = None
+
+
+class CollectionHealthResponse(BaseModel):
+    collection: str
+    healthy: bool
+    loaded: bool
+    readable: bool
+    row_count: int
+    error: str | None = None
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok", "degraded"]
+    database_connected: bool
+    model: str
+    vector_store: str
+    vector_store_connected: bool
+    collections: dict[str, str]
+    collection_health: dict[str, CollectionHealthResponse]
+
+
+class QueryResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    mode: Literal["text2sql", "agent"]
+    success: bool
+    question: str
+    sql: str = ""
+    columns: list[str] = Field(default_factory=list)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    duration_ms: float = 0
+    error: str | None = None
+    error_type: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -89,8 +144,19 @@ def _user_context(request: Request) -> UserContext:
     return request.state.user_context
 
 
+def _json_serializer(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def _sse_event(event: str, data: Any) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+    encoded = json.dumps(data, ensure_ascii=False, default=_json_serializer)
+    return f"event: {event}\ndata: {encoded}\n\n"
 
 
 @app.middleware("http")
@@ -121,19 +187,50 @@ async def unknown_error(_: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"success": False, "error_type": "internal", "error": "系统内部错误"})
 
 
-@app.get("/health")
-def health() -> dict[str, Any]:
-    application = get_application()
-    return {
-        "status": "ok" if application.system.db.validate_connection() else "degraded",
-        "database_connected": application.system.db.validate_connection(),
-        "model": application.system.llm.model,
-        "vector_store": "milvus",
-        "collections": settings.milvus.collections,
-    }
+@app.get("/health", response_model=HealthResponse, tags=["系统"], summary="健康检查")
+def health() -> HealthResponse:
+    database = DatabaseClient(settings)
+    try:
+        database_connected = database.validate_connection()
+    finally:
+        database.connection_pool.close()
+
+    try:
+        collection_health = inspect_collections(settings)
+        vector_store_connected = bool(collection_health) and all(
+            detail["healthy"] for detail in collection_health.values()
+        )
+    except Exception as exc:
+        logger.warning("Milvus health check failed: %s", exc)
+        vector_store_connected = False
+        collection_health = {
+            kind: {
+                "collection": name,
+                "healthy": False,
+                "loaded": False,
+                "readable": False,
+                "row_count": 0,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            for kind, name in settings.milvus.collections.items()
+        }
+    return HealthResponse(
+        status="ok" if database_connected and vector_store_connected else "degraded",
+        database_connected=database_connected,
+        model=settings.llm.model,
+        vector_store="milvus",
+        vector_store_connected=vector_store_connected,
+        collections=settings.milvus.collections,
+        collection_health=collection_health,
+    )
 
 
-@app.post("/api/v1/query")
+@app.post(
+    "/api/v1/query",
+    response_model=QueryResponse,
+    tags=["查询"],
+    summary="同步自然语言查询",
+)
 def query(payload: QueryRequest, request: Request) -> dict:
     result = get_application().query(
         payload.question,
@@ -141,6 +238,7 @@ def query(payload: QueryRequest, request: Request) -> dict:
         _user_context(request),
         payload.force_complex,
         payload.source_id,
+        payload.conversation_context or "",
     )
     if not result.get("success"):
         error_type = result.get("error_type")
@@ -157,16 +255,29 @@ def query(payload: QueryRequest, request: Request) -> dict:
     return result
 
 
-@app.post("/api/v1/query/stream")
+@app.post(
+    "/api/v1/query/stream",
+    tags=["查询"],
+    summary="SSE 流式查询（逐步推送）",
+    description="使用 `sql_chunk` / `sql_done` / `result` / `error` 事件持续推送分析过程。",
+    responses={200: {"content": {"text/event-stream": {"example": "event: sql_chunk\ndata: {\"content\":\"SELECT\"}\n\n"}}}},
+)
 def query_stream(payload: QueryRequest, request: Request) -> StreamingResponse:
     application = get_application()
     options = _resolve_options(payload)
     user = _user_context(request)
 
     def generate():
-        if payload.force_complex or application.is_complex(payload.question):
+        if payload.force_complex or payload.conversation_context or application.is_complex(payload.question):
             yield _sse_event("status", {"stage": "planning", "message": "正在拆解复杂分析任务"})
-            result = application.query(payload.question, options, user, True, payload.source_id)
+            result = application.query(
+                payload.question,
+                options,
+                user,
+                True,
+                payload.source_id,
+                payload.conversation_context or "",
+            )
             if result.get("plan"):
                 yield _sse_event("plan", result["plan"])
             for step in result.get("step_results", []):
@@ -177,7 +288,15 @@ def query_stream(payload: QueryRequest, request: Request) -> StreamingResponse:
             for item in application.system.run_stream(payload.question, options, user, payload.source_id):
                 yield _sse_event(item["event"], item["data"])
 
-    return StreamingResponse(generate(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 static_dir = Path(__file__).with_name("static")

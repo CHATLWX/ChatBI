@@ -11,6 +11,7 @@ RULES = """
 7. 订单数默认 COUNT(DISTINCT order_id)，销售数量才使用 SUM(quantity)。
 8. 利润=毛利-期间费用；订单与费用必须先按月分别聚合，再按月份关联。
 9. 当前数据库为 MySQL 8.0，不支持 FULL OUTER JOIN。需要完整月份集合时使用月份CTE后 LEFT JOIN，或 UNION LEFT/RIGHT JOIN。
+10. finance_expenses 只有月份和部门粒度。没有明确费用分摊规则时，客户、产品、区域、国家、行业等销售维度只能计算毛利/毛利率，禁止把整月期间费用对每个维度成员重复扣减。
 """
 
 ERROR_GUARDS = """
@@ -20,6 +21,7 @@ ERROR_GUARDS = """
 - 检查 GROUP BY 覆盖所有非聚合 SELECT 字段。
 - 检查时间范围为左闭右开，不混用订单日期和费用日期。
 - 禁止订单事实表与费用事实表按月份明细直接关联，防止多对多放大。
+- 禁止在客户、产品或区域分组中把同一笔月度期间费用完整扣减多次；这些维度应改用毛利类指标。
 - 禁止 FULL OUTER JOIN、QUALIFY 等非 MySQL 语法。
 """
 

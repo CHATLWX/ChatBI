@@ -1,21 +1,215 @@
 from __future__ import annotations
 
-
-INDICATOR_DEFINITIONS = [
-    {"name": "收入", "level": "原子指标", "aliases": ["销售额", "营收", "销售收入"], "definition": "已完成订单的不含税销售收入，按汇率折算人民币。", "formula": "SUM(o.net_amount*r.rate_to_cny)", "sql_template": "sales_orders o JOIN exchange_rates r，按月份及币种关联", "data_source": ["sales_orders", "exchange_rates"], "depends_on": [], "time_field": "o.order_date", "filters": ["o.order_status='completed'"], "notes": "禁止默认使用 gross_amount。"},
-    {"name": "销量", "level": "原子指标", "aliases": ["销售数量", "销售量", "MWh", "套数"], "definition": "已完成订单的产品销售数量。", "formula": "SUM(o.quantity)", "sql_template": "SELECT SUM(quantity) FROM sales_orders", "data_source": ["sales_orders"], "depends_on": [], "time_field": "o.order_date", "filters": ["o.order_status='completed'"], "notes": "不代表订单笔数。"},
-    {"name": "订单量", "level": "原子指标", "aliases": ["订单数", "订单数量", "订单笔数"], "definition": "已完成订单的记录笔数。", "formula": "COUNT(DISTINCT o.order_id)", "sql_template": "SELECT COUNT(DISTINCT order_id) FROM sales_orders", "data_source": ["sales_orders"], "depends_on": [], "time_field": "o.order_date", "filters": ["o.order_status='completed'"], "notes": "不能使用 SUM(quantity)。"},
-    {"name": "销售成本", "level": "原子指标", "aliases": ["主营成本", "已售产品成本", "成本"], "definition": "已售产品实际材料成本和人工成本之和。", "formula": "SUM((p.material_cost+p.labor_cost)*o.quantity)", "sql_template": "sales_orders JOIN dim_products", "data_source": ["sales_orders", "dim_products"], "depends_on": [], "time_field": "o.order_date", "filters": ["o.order_status='completed'"], "notes": "禁止用 standard_cost。"},
-    {"name": "期间费用", "level": "原子指标", "aliases": ["运营费用", "经营费用", "费用"], "definition": "研发、销售、管理和财务费用之和。", "formula": "SUM(rd_expense+selling_expense+admin_expense+finance_expense)", "sql_template": "SELECT SUM(...) FROM finance_expenses", "data_source": ["finance_expenses"], "depends_on": [], "time_field": "expense_date", "filters": [], "notes": "selling_expense 已包含市场、物流、质保子项，不得重复累加。"},
-    {"name": "毛利", "level": "派生指标", "aliases": ["毛利润", "gross profit"], "definition": "销售收入减销售成本，反映产品本身盈利能力。", "formula": "收入-销售成本", "sql_template": "SUM(o.net_amount*r.rate_to_cny)-SUM((p.material_cost+p.labor_cost)*o.quantity)", "data_source": ["sales_orders", "dim_products", "exchange_rates"], "depends_on": ["收入", "销售成本"], "time_field": "o.order_date", "filters": ["o.order_status='completed'"], "notes": "收入按人民币口径，成本使用实际材料与人工成本。"},
-    {"name": "毛利率", "level": "派生指标", "aliases": ["毛利润率", "gross_margin", "产品利润率"], "definition": "毛利占收入的百分比，反映产品盈利效率。", "formula": "毛利/收入*100", "sql_template": "100*毛利/NULLIF(收入,0)", "data_source": ["sales_orders", "dim_products", "exchange_rates"], "depends_on": ["毛利", "收入"], "time_field": "o.order_date", "filters": ["o.order_status='completed'"], "notes": "结果为百分比。"},
-    {"name": "利润", "level": "复合指标", "aliases": ["经营利润", "净利润", "赚了多少"], "definition": "毛利减期间费用。订单和费用必须先按月分别聚合后再关联。", "formula": "毛利-期间费用", "sql_template": "WITH monthly_gross_profit AS (...), monthly_expense AS (...) SELECT ...", "data_source": ["sales_orders", "dim_products", "exchange_rates", "finance_expenses"], "depends_on": ["毛利", "期间费用"], "time_field": "order_date, expense_date", "filters": ["o.order_status='completed'"], "notes": "MySQL 不支持 FULL OUTER JOIN；禁止两个事实表明细直接关联。"},
-    {"name": "产品线收入", "level": "派生指标", "aliases": ["各产品线赚了多少", "业务线收入"], "definition": "按产品线汇总的人民币销售收入。", "formula": "SUM(o.net_amount*r.rate_to_cny) GROUP BY p.product_line", "sql_template": "sales_orders JOIN dim_products JOIN exchange_rates", "data_source": ["sales_orders", "dim_products", "exchange_rates"], "depends_on": ["收入"], "time_field": "o.order_date", "filters": ["o.order_status='completed'"], "notes": "产品线字段来自 dim_products。"},
-    {"name": "客单价", "level": "派生指标", "aliases": ["平均订单金额", "平均一笔订单多少钱"], "definition": "收入除以已完成订单笔数。", "formula": "收入/订单量", "sql_template": "SUM(net_amount*rate)/COUNT(DISTINCT order_id)", "data_source": ["sales_orders", "exchange_rates"], "depends_on": ["收入", "订单量"], "time_field": "o.order_date", "filters": ["o.order_status='completed'"], "notes": "分母是订单笔数。"},
-    {"name": "研发费用率", "level": "派生指标", "aliases": ["研发投入占比", "研发占营收"], "definition": "研发费用占收入的百分比。", "formula": "研发费用/收入*100", "sql_template": "月度研发费用与月度收入聚合后关联", "data_source": ["finance_expenses", "sales_orders", "exchange_rates"], "depends_on": ["收入"], "time_field": "order_date, expense_date", "filters": ["o.order_status='completed'"], "notes": "两个事实表必须先聚合。"},
-    {"name": "销售费用率", "level": "派生指标", "aliases": ["销售费用占比", "销售投入占营收"], "definition": "销售费用总项占收入的百分比。", "formula": "selling_expense/收入*100", "sql_template": "月度销售费用与月度收入聚合后关联", "data_source": ["finance_expenses", "sales_orders", "exchange_rates"], "depends_on": ["收入"], "time_field": "order_date, expense_date", "filters": ["o.order_status='completed'"], "notes": "不得重复加销售费用子项。"},
-    {"name": "利润率", "level": "复合指标", "aliases": ["经营利润率", "净利率"], "definition": "利润占收入的百分比。", "formula": "利润/收入*100", "sql_template": "月度利润与月度收入计算", "data_source": ["sales_orders", "dim_products", "exchange_rates", "finance_expenses"], "depends_on": ["利润", "收入"], "time_field": "order_date, expense_date", "filters": ["o.order_status='completed'"], "notes": "需避免事实表多对多放大。"},
-]
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Iterable
 
 
+INDICATOR_JSON_PATH = Path(__file__).with_name("indicators.json")
+
+
+@dataclass(frozen=True)
+class IndicatorDefinition:
+    id: str
+    name: str
+    level: str
+    aliases: tuple[str, ...]
+    definition: str
+    formula: str
+    sql_template: str
+    data_source: tuple[str, ...]
+    depends_on: tuple[str, ...]
+    time_field: str
+    filters: tuple[str, ...]
+    unit: str = ""
+    notes: str = ""
+
+    @classmethod
+    def from_dict(cls, value: dict) -> "IndicatorDefinition":
+        return cls(
+            id=str(value["id"]).strip(),
+            name=str(value["name"]).strip(),
+            level=str(value["level"]).strip(),
+            aliases=tuple(str(item).strip() for item in value.get("aliases", []) if str(item).strip()),
+            definition=str(value.get("definition", "")).strip(),
+            formula=str(value.get("formula", "")).strip(),
+            sql_template=str(value.get("sql_template", "")).strip(),
+            data_source=tuple(str(item).strip() for item in value.get("data_source", []) if str(item).strip()),
+            depends_on=tuple(str(item).strip() for item in value.get("depends_on", []) if str(item).strip()),
+            time_field=str(value.get("time_field", "")).strip(),
+            filters=tuple(str(item).strip() for item in value.get("filters", []) if str(item).strip()),
+            unit=str(value.get("unit", "")).strip(),
+            notes=str(value.get("notes", "")).strip(),
+        )
+
+    def to_dict(self) -> dict:
+        value = asdict(self)
+        for key in ("aliases", "data_source", "depends_on", "filters"):
+            value[key] = list(value[key])
+        return value
+
+
+@dataclass(frozen=True)
+class ResolvedIndicator:
+    indicator: IndicatorDefinition
+    root: str
+    depth: int
+    dependency_path: tuple[str, ...]
+
+    def to_dict(self) -> dict:
+        value = self.indicator.to_dict()
+        value.update(
+            {
+                "dependency_expanded": self.depth > 0,
+                "dependency_root": self.root,
+                "dependency_depth": self.depth,
+                "dependency_path": list(self.dependency_path),
+            }
+        )
+        return value
+
+
+class IndicatorCatalog:
+    """Validated indicator catalog with deterministic detection and dependency traversal."""
+
+    def __init__(self, indicators: Iterable[IndicatorDefinition], version: int = 1):
+        self.version = version
+        self.definitions = tuple(indicators)
+        self.by_name = {item.name: item for item in self.definitions}
+        self.by_id = {item.id: item for item in self.definitions}
+        self.alias_map: dict[str, str] = {}
+        self._validate()
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "IndicatorCatalog":
+        records = payload.get("indicators", [])
+        return cls(
+            (IndicatorDefinition.from_dict(record) for record in records),
+            version=int(payload.get("version", 1)),
+        )
+
+    @classmethod
+    def from_json(cls, path: str | Path = INDICATOR_JSON_PATH) -> "IndicatorCatalog":
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls.from_dict(payload)
+
+    def to_dict(self) -> dict:
+        return {
+            "version": self.version,
+            "indicators": [item.to_dict() for item in self.definitions],
+        }
+
+    def as_dicts(self) -> list[dict]:
+        return [item.to_dict() for item in self.definitions]
+
+    def detect(self, question: str) -> list[str]:
+        """Detect metric aliases while preferring the longest overlapping phrase."""
+        text = question.casefold()
+        candidates: list[tuple[int, int, str]] = []
+        for alias, name in self.alias_map.items():
+            start = text.find(alias)
+            while start >= 0:
+                candidates.append((start, start + len(alias), name))
+                start = text.find(alias, start + 1)
+        candidates.sort(key=lambda item: (item[0], -(item[1] - item[0])))
+
+        occupied: list[tuple[int, int]] = []
+        detected: list[str] = []
+        for start, end, name in candidates:
+            if any(start < used_end and end > used_start for used_start, used_end in occupied):
+                continue
+            occupied.append((start, end))
+            if name not in detected:
+                detected.append(name)
+        return detected
+
+    def resolve_dependencies(
+        self,
+        indicator_names: Iterable[str],
+        *,
+        recursive: bool = True,
+    ) -> list[ResolvedIndicator]:
+        """Return roots and dependencies with traceable paths, de-duplicated by metric name."""
+        resolved: list[ResolvedIndicator] = []
+        seen: set[str] = set()
+
+        def visit(name: str, root: str, path: tuple[str, ...]) -> None:
+            if name not in self.by_name:
+                raise ValueError(f"指标 {root} 依赖未定义指标：{name}")
+            if name in path:
+                cycle = " -> ".join((*path, name))
+                raise ValueError(f"指标依赖存在循环：{cycle}")
+            current_path = (*path, name)
+            if name not in seen:
+                seen.add(name)
+                resolved.append(
+                    ResolvedIndicator(
+                        indicator=self.by_name[name],
+                        root=root,
+                        depth=len(current_path) - 1,
+                        dependency_path=current_path,
+                    )
+                )
+            if recursive or len(current_path) == 1:
+                for dependency in self.by_name[name].depends_on:
+                    visit(dependency, root, current_path)
+
+        for name in indicator_names:
+            if name in self.by_name:
+                visit(name, name, ())
+        return resolved
+
+    def dependency_graph(self, indicator_names: Iterable[str] | None = None) -> dict[str, list[str]]:
+        names = list(indicator_names) if indicator_names is not None else list(self.by_name)
+        return {
+            name: list(self.by_name[name].depends_on)
+            for name in names
+            if name in self.by_name
+        }
+
+    def dependents_of(self, indicator_name: str) -> list[str]:
+        return [
+            item.name
+            for item in self.definitions
+            if indicator_name in item.depends_on
+        ]
+
+    def _validate(self) -> None:
+        if not self.definitions:
+            raise ValueError("指标目录不能为空")
+        if len(self.by_name) != len(self.definitions):
+            raise ValueError("指标名称必须唯一")
+        if len(self.by_id) != len(self.definitions):
+            raise ValueError("指标 id 必须唯一")
+
+        for indicator in self.definitions:
+            if not indicator.id or not indicator.name:
+                raise ValueError("指标 id 和名称不能为空")
+            for phrase in (indicator.name, *indicator.aliases):
+                key = phrase.casefold()
+                owner = self.alias_map.get(key)
+                if owner and owner != indicator.name:
+                    raise ValueError(f"指标别名冲突：{phrase} 同时属于 {owner} 和 {indicator.name}")
+                self.alias_map[key] = indicator.name
+            for dependency in indicator.depends_on:
+                if dependency not in self.by_name:
+                    raise ValueError(f"指标 {indicator.name} 依赖未定义指标：{dependency}")
+
+        # A full traversal validates cycles even for indicators not queried at runtime.
+        for indicator in self.definitions:
+            self._validate_path(indicator.name, ())
+
+    def _validate_path(self, name: str, path: tuple[str, ...]) -> None:
+        if name in path:
+            cycle = " -> ".join((*path, name))
+            raise ValueError(f"指标依赖存在循环：{cycle}")
+        for dependency in self.by_name[name].depends_on:
+            self._validate_path(dependency, (*path, name))
+
+
+INDICATOR_CATALOG = IndicatorCatalog.from_json()
+
+# Backward-compatible views for existing Milvus indexing and prompt modules.
+INDICATOR_DEFINITIONS = INDICATOR_CATALOG.as_dicts()
 INDICATOR_BY_NAME = {item["name"]: item for item in INDICATOR_DEFINITIONS}

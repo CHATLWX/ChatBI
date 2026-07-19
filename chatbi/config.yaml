@@ -32,6 +32,13 @@ milvus:
     fields: field_descriptions
     indicators: indicator_definitions
 
+obsidian:
+  # 留空时自动读取本机 Obsidian 配置并选择当前打开的 vault。
+  vault_path: ""
+  indicator_folder: ChatBI指标知识库
+  auto_discover: true
+  runtime_preferred: true
+
 retrieval:
   table_top_k: 5
   field_top_k: 12

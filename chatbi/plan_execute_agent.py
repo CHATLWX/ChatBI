@@ -28,12 +28,13 @@ class PlanAndExecuteAgent:
         options: QueryOptions | None = None,
         security_context: UserContext | None = None,
         source_id: str | None = None,
+        conversation_context: str = "",
     ) -> AgentResult:
         started = time.perf_counter()
         options = options or QueryOptions()
         security_context = security_context or UserContext.demo_admin()
         try:
-            decomposition = self.decomposer.decompose(user_question)
+            decomposition = self.decomposer.decompose(user_question, conversation_context)
             plan = self.planner.create_plan(decomposition)
             results, execution_context = self.executor.execute(
                 plan, user_question, options, security_context, source_id

@@ -49,7 +49,7 @@ def main() -> None:
             if options.use_schema_linking
             else system._full_schema_fallback()
         )
-        _, indicator_block = system._resolve_indicator_context(
+        _, indicator_block, _ = system._resolve_indicator_context(
             runtime,
             question,
             options.use_indicator_knowledge,
