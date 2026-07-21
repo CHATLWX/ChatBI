@@ -32,6 +32,30 @@ def test_department_profit_is_rejected_instead_of_inventing_sales_grain():
         apply_semantic_policy("按部门查看利润")
 
 
+@pytest.mark.parametrize(
+    ("question", "metric", "dimension"),
+    [
+        ("按产品线分析研发费用率", "研发费用率", "产品线"),
+        ("按部门分析销售费用率", "销售费用率", "部门"),
+    ],
+)
+def test_expense_rate_dimension_conflict_is_rejected(question, metric, dimension):
+    with pytest.raises(SemanticPolicyError) as exc_info:
+        apply_semantic_policy(question)
+
+    message = str(exc_info.value)
+    assert metric in message
+    assert dimension in message
+    assert "按月份查询" in message
+
+
+def test_monthly_expense_rate_is_kept_without_metric_substitution():
+    result = apply_semantic_policy("查询上个月研发费用率")
+
+    assert result.adjusted is False
+    assert result.effective_question == "查询上个月研发费用率"
+
+
 def test_gross_profit_field_rules_do_not_force_period_expense_table():
     force_include, _force_exclude, _reasons = FieldMatcher._active_rules("各产品线毛利率")
 

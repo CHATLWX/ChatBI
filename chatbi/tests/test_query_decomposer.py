@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from query_decomposer import MAX_TASKS, QueryDecomposer
 
 
@@ -142,6 +144,57 @@ def test_retries_when_description_mentions_unselected_dimension():
     assert llm.calls == 2
 
 
+def test_repairs_repeated_product_line_profit_plan_after_retry():
+    invalid_task = task("task_3", dimensions=["月份"])
+    invalid_task["task_name"] = "按产品线分析利润"
+    invalid_task["description"] = "按月份和产品线识别利润下降来源"
+    invalid_task["metrics"] = ["利润"]
+    invalid_plan = {
+        "question_type": "attribution",
+        "analysis_goal": "分析最近三个月利润下降原因",
+        "subtasks": [invalid_task],
+    }
+    llm = FakeLLM([invalid_plan, invalid_plan])
+
+    plan = QueryDecomposer(llm).decompose("最近三个月利润为什么下降？")
+
+    repaired = plan.subtasks[0]
+    assert llm.calls == 2
+    assert repaired.dimensions == ["月份", "产品线"]
+    assert repaired.metrics == ["毛利"]
+    assert repaired.task_name == "按产品线分析毛利"
+    assert repaired.description == "按月份和产品线识别毛利下降来源"
+
+
+def test_uses_semantic_profit_attribution_plan_when_repeated_plan_is_overwide():
+    overwide_task = task("task_6", dimensions=["月份", "大区", "产品线"])
+    overwide_task["task_name"] = "综合分析利润下降原因"
+    overwide_task["description"] = "按月份、大区和产品线综合分析利润下降原因"
+    overwide_task["metrics"] = ["利润"]
+    invalid_plan = {
+        "question_type": "attribution",
+        "analysis_goal": "最近三个月利润为什么下降？",
+        "subtasks": [overwide_task],
+    }
+    llm = FakeLLM([invalid_plan, invalid_plan])
+
+    plan = QueryDecomposer(llm).decompose("最近三个月利润为什么下降？")
+
+    assert llm.calls == 2
+    assert len(plan.subtasks) == 6
+    assert plan.subtasks[0].dimensions == ["月份"]
+    assert plan.subtasks[0].metrics == ["利润"]
+    assert plan.subtasks[2].dimensions == ["月份", "产品线"]
+    assert plan.subtasks[2].metrics == ["毛利", "毛利率"]
+    assert plan.subtasks[3].dimensions == ["月份", "大区"]
+    assert plan.subtasks[3].metrics == ["毛利", "毛利率"]
+    assert plan.subtasks[5].dimensions == ["月份", "部门"]
+    assert all(
+        not ("利润" in task.metrics and set(task.dimensions) - {"月份"})
+        for task in plan.subtasks
+    )
+
+
 def test_retries_when_profit_uses_dimension_without_expense_allocation():
     invalid_task = task("task_1", dimensions=["月份", "大区"])
     invalid_task["description"] = "按月份和大区分析利润"
@@ -196,7 +249,7 @@ def test_retries_when_model_invents_undefined_metric():
     assert llm.calls == 2
 
 
-def test_falls_back_to_gross_margin_when_model_repeats_expense_by_region():
+def test_rejects_expense_by_region_instead_of_replacing_it_with_gross_profit():
     invalid_task = task("task_1", dimensions=["月份", "大区"])
     invalid_task["task_name"] = "按大区分析期间费用"
     invalid_task["description"] = "按月份和大区分析期间费用"
@@ -208,15 +261,13 @@ def test_falls_back_to_gross_margin_when_model_repeats_expense_by_region():
     }
     llm = FakeLLM([invalid_plan, invalid_plan])
 
-    plan = QueryDecomposer(llm).decompose("分析未来应该做什么")
+    with pytest.raises(ValueError, match="费用指标只能按月份或部门查询"):
+        QueryDecomposer(llm).decompose("分析未来应该做什么")
 
     assert llm.calls == 2
-    assert plan.subtasks[0].metrics == ["毛利"]
-    assert plan.subtasks[0].task_name == "按大区分析毛利"
-    assert plan.subtasks[0].description == "按月份和大区分析毛利"
 
 
-def test_falls_back_to_expense_amount_when_model_repeats_rate_by_department():
+def test_rejects_department_expense_rate_without_denominator_definition():
     invalid_task = task("task_5", dimensions=["月份", "部门"])
     invalid_task["task_name"] = "按部门分析销售费用率"
     invalid_task["description"] = "按月份和部门分析销售费用率"
@@ -228,12 +279,10 @@ def test_falls_back_to_expense_amount_when_model_repeats_rate_by_department():
     }
     llm = FakeLLM([invalid_plan, invalid_plan])
 
-    plan = QueryDecomposer(llm).decompose("分析费用投入")
+    with pytest.raises(ValueError, match="请改为按月份查询该费用率"):
+        QueryDecomposer(llm).decompose("分析费用投入")
 
     assert llm.calls == 2
-    assert plan.subtasks[0].metrics == ["selling_expense"]
-    assert plan.subtasks[0].task_name == "按部门分析销售费用"
-    assert plan.subtasks[0].description == "按月份和部门分析销售费用"
 
 
 def test_retries_when_model_returns_metricless_validation_task():

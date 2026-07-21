@@ -9,6 +9,7 @@ class SemanticPolicyError(ValueError):
 
 
 _PROFIT_PATTERN = re.compile(r"(?<!毛)(经营利润率|经营利润|净利润率|净利润|净利率|利润率|利润)")
+_EXPENSE_RATE_PATTERN = re.compile(r"(研发费用率|销售费用率)")
 _DIMENSION_MARKERS = {
     "客户类型": ("客户类型", "客户"),
     "大区": ("大区", "区域", "欧洲", "北美", "亚太"),
@@ -60,6 +61,13 @@ def apply_semantic_policy(question: str) -> SemanticPolicyResult:
         for name, markers in _DIMENSION_MARKERS.items()
         if any(marker.lower() in question.lower() for marker in markers)
     )
+    expense_rate_match = _EXPENSE_RATE_PATTERN.search(question)
+    if expense_rate_match and dimensions:
+        metric = expense_rate_match.group(0)
+        raise SemanticPolicyError(
+            f"{metric}不支持{'、'.join(dimensions)}维度：尚未定义费用分摊规则和对应收入分母。"
+            f"请改为按月份查询{metric}；如需分析这些维度，请单独查询毛利率。"
+        )
     profit_match = _PROFIT_PATTERN.search(question)
     if not profit_match or not dimensions:
         return SemanticPolicyResult(question, question, dimensions)

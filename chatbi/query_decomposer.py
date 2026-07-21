@@ -15,6 +15,14 @@ MAX_DIMENSIONS_PER_TASK = 2
 ABSOLUTE_DATE_PATTERN = re.compile(
     r"20\d{2}(?:[-/]\d{1,2}(?:[-/]\d{1,2})?|年(?:\d{1,2}月(?:\d{1,2}日)?)?)"
 )
+RELATIVE_TIME_PATTERN = re.compile(
+    r"(?:最近|近|过去)\s*(?:[一二三四五六七八九十百\d]+)\s*个?月|"
+    r"最近半年|近半年|过去半年|上个月|本月|今年|去年"
+)
+PROFIT_ATTRIBUTION_PATTERN = re.compile(
+    r"(?<!毛)(?:经营利润率|经营利润|净利润率|净利润|净利率|利润率|利润)"
+)
+ATTRIBUTION_MARKERS = ("为什么", "原因", "归因", "下降", "上升", "波动", "变化", "驱动", "影响")
 
 DIMENSION_ALIASES = {
     "月份": "月份",
@@ -87,19 +95,18 @@ METRIC_ALLOWED_DIMENSIONS = {
 }
 
 DIMENSION_FALLBACK_METRICS = {
-    "期间费用": "毛利",
-    "rd_expense": "毛利",
-    "selling_expense": "毛利",
-    "admin_expense": "毛利",
-    "finance_expense": "毛利",
-    "研发费用率": "毛利率",
-    "销售费用率": "毛利率",
     "利润": "毛利",
     "利润率": "毛利率",
 }
-DEPARTMENT_RATE_FALLBACKS = {
-    "研发费用率": ("rd_expense", "研发费用"),
-    "销售费用率": ("selling_expense", "销售费用"),
+EXPENSE_RATE_METRICS = {"研发费用率", "销售费用率"}
+EXPENSE_AMOUNT_METRICS = {
+    "期间费用",
+    "研发费用",
+    "销售费用",
+    "rd_expense",
+    "selling_expense",
+    "admin_expense",
+    "finance_expense",
 }
 
 
@@ -168,8 +175,12 @@ metrics 可用值：{', '.join(AVAILABLE_METRICS)}
 8. 单个任务最多使用 {MAX_DIMENSIONS_PER_TASK} 个维度（通常是月份加一个业务维度）；多个业务维度必须拆成不同任务，避免单条 SQL 过宽
 9. description 必须原样保留用户的相对时间范围。例如“最近三个月”仍写“最近三个月”，用户未给出年份、月份或具体日期时，绝对禁止猜测或补写任何绝对日期
 10. 只能使用当前 Schema、所选 dimensions 和上述指标口径，不得改写成 standard_cost 等其他口径
-11. metrics 只能从“metrics 可用值”中选择。利润/利润率只能按月份分析；期间费用及费用分项只能按月份或部门分析；客户、产品、区域等维度没有费用分摊规则，必须使用毛利/毛利率而不是利润/利润率
-12. 仅返回 JSON 对象，不要使用 Markdown{feedback}
+11. metrics 只能从“metrics 可用值”中选择。利润/利润率只能按月份分析；期间费用及费用分项只能按月份或部门分析；客户、产品、区域等维度没有费用分摊规则，利润归因任务应另建毛利/毛利率任务
+12. 研发费用率和销售费用率只支持月份维度；维度不兼容时不得替换成毛利率，也不得替换成费用金额，必须重拆任务或明确报错
+13. task_name 或 description 中提到的每个业务维度都必须出现在 dimensions 中
+14. 分析利润变化原因时：利润趋势任务只能使用月份；产品线、区域、客户等经营维度必须分析毛利/毛利率；费用驱动必须单独按月份或部门分析
+15. 不要创建同时包含多个经营维度的综合 SQL 任务，最终综合判断由报告阶段完成
+16. 仅返回 JSON 对象，不要使用 Markdown{feedback}
 """.strip()
     return system_msg, prompt
 
@@ -206,13 +217,122 @@ class QueryDecomposer:
                 feedback = str(exc)
                 if attempt == 1 and plan is not None:
                     try:
+                        self._repair_dimensions_from_task_text(plan)
                         self._apply_dimension_metric_fallbacks(plan)
                         self._validate_plan(plan, question)
                         return plan
                     except Exception as repaired_exc:
+                        if self._is_profit_attribution(question):
+                            canonical_plan = self._build_profit_attribution_plan(question)
+                            self._validate_plan(canonical_plan, question)
+                            return canonical_plan
                         last_error = repaired_exc
         assert last_error is not None
         raise last_error
+
+    @staticmethod
+    def _is_profit_attribution(question: str) -> bool:
+        return bool(PROFIT_ATTRIBUTION_PATTERN.search(question)) and any(
+            marker in question for marker in ATTRIBUTION_MARKERS
+        )
+
+    @staticmethod
+    def _build_profit_attribution_plan(question: str) -> DecompositionPlan:
+        """Build an executable semantic plan when the LLM repeatedly violates profit grain rules."""
+        time_match = RELATIVE_TIME_PATTERN.search(question)
+        period = time_match.group(0) if time_match else "目标期间"
+        return DecompositionPlan.model_validate(
+            {
+                "question_type": "profit_attribution",
+                "analysis_goal": question,
+                "subtasks": [
+                    {
+                        "task_id": "task_1",
+                        "task_name": "判断月度利润趋势",
+                        "task_type": "trend",
+                        "description": f"按月份分析{period}利润趋势",
+                        "depends_on": [],
+                        "dimensions": ["月份"],
+                        "metrics": ["利润"],
+                    },
+                    {
+                        "task_id": "task_2",
+                        "task_name": "拆解月度毛利变化",
+                        "task_type": "decomposition",
+                        "description": f"按月份拆解{period}收入、销售成本、毛利和毛利率变化",
+                        "depends_on": ["task_1"],
+                        "dimensions": ["月份"],
+                        "metrics": ["收入", "销售成本", "毛利", "毛利率"],
+                    },
+                    {
+                        "task_id": "task_3",
+                        "task_name": "定位产品线毛利贡献",
+                        "task_type": "attribution",
+                        "description": f"按月份和产品线分析{period}毛利与毛利率贡献",
+                        "depends_on": ["task_2"],
+                        "dimensions": ["月份", "产品线"],
+                        "metrics": ["毛利", "毛利率"],
+                    },
+                    {
+                        "task_id": "task_4",
+                        "task_name": "定位区域毛利贡献",
+                        "task_type": "attribution",
+                        "description": f"按月份和大区分析{period}毛利与毛利率贡献",
+                        "depends_on": ["task_2"],
+                        "dimensions": ["月份", "大区"],
+                        "metrics": ["毛利", "毛利率"],
+                    },
+                    {
+                        "task_id": "task_5",
+                        "task_name": "拆解月度期间费用",
+                        "task_type": "decomposition",
+                        "description": f"按月份分析{period}期间费用及各费用分项变化",
+                        "depends_on": ["task_1"],
+                        "dimensions": ["月份"],
+                        "metrics": [
+                            "期间费用",
+                            "rd_expense",
+                            "selling_expense",
+                            "admin_expense",
+                            "finance_expense",
+                        ],
+                    },
+                    {
+                        "task_id": "task_6",
+                        "task_name": "定位部门费用贡献",
+                        "task_type": "attribution",
+                        "description": f"按月份和部门分析{period}研发、销售、管理和财务费用贡献",
+                        "depends_on": ["task_5"],
+                        "dimensions": ["月份", "部门"],
+                        "metrics": [
+                            "rd_expense",
+                            "selling_expense",
+                            "admin_expense",
+                            "finance_expense",
+                        ],
+                    },
+                ],
+            }
+        )
+
+    @staticmethod
+    def _repair_dimensions_from_task_text(plan: DecompositionPlan) -> None:
+        """Fill a model-omitted dimension when the repaired task remains executable."""
+        for task in plan.subtasks:
+            normalized = []
+            for dimension in task.dimensions:
+                canonical = DIMENSION_ALIASES.get(dimension.strip().lower(), dimension)
+                if canonical not in normalized:
+                    normalized.append(canonical)
+
+            task_text = f"{task.task_name} {task.description}".lower()
+            mentioned = []
+            for alias, canonical in DIMENSION_ALIASES.items():
+                if alias in task_text and canonical not in mentioned:
+                    mentioned.append(canonical)
+            repaired = normalized + [name for name in mentioned if name not in normalized]
+            if len(repaired) <= MAX_DIMENSIONS_PER_TASK:
+                task.dimensions = repaired
 
     @staticmethod
     def _apply_dimension_metric_fallbacks(plan: DecompositionPlan) -> None:
@@ -228,12 +348,8 @@ class QueryDecomposer:
                 if allowed is None or not normalized_dimensions - allowed:
                     continue
 
-                department_fallback = DEPARTMENT_RATE_FALLBACKS.get(metric)
-                if department_fallback and normalized_dimensions <= {"月份", "部门"}:
-                    replacement, display_name = department_fallback
-                else:
-                    replacement = DIMENSION_FALLBACK_METRICS.get(metric)
-                    display_name = replacement
+                replacement = DIMENSION_FALLBACK_METRICS.get(metric)
+                display_name = replacement
 
                 if replacement:
                     replacement_allowed = METRIC_ALLOWED_DIMENSIONS[replacement]
@@ -294,9 +410,20 @@ class QueryDecomposer:
                     continue
                 incompatible = set(normalized_dimensions) - allowed_dimensions
                 if incompatible:
+                    dimensions_text = "、".join(sorted(incompatible))
+                    if metric in EXPENSE_RATE_METRICS:
+                        raise ValueError(
+                            f"任务 {task.task_id} 的指标 {metric} 不支持维度：{dimensions_text}；"
+                            "尚未定义费用分摊规则和对应收入分母，请改为按月份查询该费用率"
+                        )
+                    if metric in EXPENSE_AMOUNT_METRICS:
+                        raise ValueError(
+                            f"任务 {task.task_id} 的指标 {metric} 不支持维度：{dimensions_text}；"
+                            "费用指标只能按月份或部门查询，不得替换为毛利类指标"
+                        )
                     raise ValueError(
                         f"任务 {task.task_id} 的指标 {metric} 不支持维度："
-                        + "、".join(sorted(incompatible))
+                        + dimensions_text
                         + "；未定义费用分摊规则时请改用毛利类指标"
                     )
 
